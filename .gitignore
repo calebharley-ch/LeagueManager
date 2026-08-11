@@ -1,0 +1,21 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+
+# Never commit real keys. .env.example is the template that IS committed.
+.env
+.env.*
+!.env.example
+
+# Supabase CLI scratch state — machine-local, not project config.
+supabase/.temp/
+
+# Stray file left in the folder before the project existed.
+New Text Document.txt
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea
