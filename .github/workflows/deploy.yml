@@ -1,0 +1,105 @@
+# Build and publish to GitHub Pages on every push to main.
+#
+# ⚠️ REQUIRES: Settings -> Pages -> Source = "GitHub Actions" (not "Deploy from
+# a branch"). While Source is still a branch, this workflow builds fine and the
+# deploy step fails — the site keeps serving whatever that branch holds.
+#
+# ⚠️ REQUIRES two repo values, as Secrets OR Variables (either works — the build
+# step falls back from one to the other):
+#   VITE_SUPABASE_URL        e.g. https://<ref>.supabase.co   (ORIGIN ONLY)
+#   VITE_SUPABASE_ANON_KEY
+# Both are public by design: Vite inlines them into the bundle that this very
+# workflow publishes to the open web. Row Level Security is what protects the
+# data, not these values. Nothing else belongs here — the service_role key,
+# ESPN cookies and the Brevo key live in Supabase and never touch a build.
+#
+# This replaces `npm run deploy` (gh-pages). That script still works, but once
+# Pages is on "GitHub Actions" it publishes to a branch nothing reads, so the
+# site would silently stop matching main. Prefer pushing.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # lets you redeploy without a code change
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race. Queue rather than cancel, so a push that lands
+# mid-deploy still ends up live instead of being dropped.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Vite does NOT fail on missing env vars — supabaseClient throws in the
+      # browser instead. Without this check a misconfigured repo deploys a
+      # green build that is a blank white screen for every visitor.
+      - name: Check build environment
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || vars.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          missing=""
+          [ -z "$VITE_SUPABASE_URL" ] && missing="$missing VITE_SUPABASE_URL"
+          [ -z "$VITE_SUPABASE_ANON_KEY" ] && missing="$missing VITE_SUPABASE_ANON_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing:$missing — add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          case "$VITE_SUPABASE_URL" in
+            */rest/v1*|*/auth/v1*|*/functions/v1*)
+              echo "::error::VITE_SUPABASE_URL must be the bare origin. supabase-js appends its own paths; a URL ending in /rest/v1 makes every request 404, which presents as an auth failure."
+              exit 1 ;;
+          esac
+          echo "Build environment looks right."
+
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || vars.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      # Catches a base-path mistake before it reaches visitors. vite.config.js
+      # hardcodes the repo name; if they ever disagree, every asset 404s and the
+      # page is blank with no console error worth reading.
+      - name: Verify base path
+        run: |
+          if ! grep -q '/LeagueManager/assets/' dist/index.html; then
+            echo "::error::dist/index.html does not reference /LeagueManager/assets/. REPO_NAME in vite.config.js must match the repository name exactly."
+            exit 1
+          fi
+          echo "Base path is correct."
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

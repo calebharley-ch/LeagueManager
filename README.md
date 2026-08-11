@@ -257,11 +257,26 @@ A site at `https://<user>.github.io/LeagueManager/` needs `base:
 '/LeagueManager/'`. Wrong value = every asset 404s. Custom domain or a
 `<user>.github.io` root repo → use `'/'`.
 
-```bash
-npm run deploy
-```
+Two ways to publish. **Prefer the workflow.**
 
-Then repo → Settings → Pages → source = `gh-pages` branch.
+**GitHub Actions (recommended).** `.github/workflows/deploy.yml` builds and
+publishes on every push to `main`. Set repo → Settings → Pages → Source =
+**GitHub Actions**, and add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+under Settings → Secrets and variables → Actions (either Secrets or Variables —
+the workflow reads both). The live site can then never drift from `main`, and
+there is no branch to mis-select.
+
+The workflow fails the build rather than shipping a broken site if those vars
+are missing, if the URL has a path appended, or if `dist/index.html` does not
+reference `/LeagueManager/assets/`. Vite does not error on missing env vars — it
+produces a green build that is a blank white screen — so those checks are the
+only thing standing between a typo and a dead site.
+
+**Manual fallback.** `npm run deploy` builds and pushes `dist/` to the
+`gh-pages` branch, with Pages Source = `Deploy from a branch` → `gh-pages` →
+`/ (root)`. ⚠️ Do not mix the two: once Source is "GitHub Actions", running
+`npm run deploy` publishes to a branch nothing reads, and the site silently
+stops matching `main`.
 
 Both `VITE_` variables must exist at **build** time — Vite inlines them, so
 building without them yields a bundle that is fine locally and broken in
