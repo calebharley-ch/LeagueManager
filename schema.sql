@@ -58,6 +58,10 @@ create table if not exists public.leagues (
   -- before the first sync, or for a league that does not use FAAB.
   faab_budget      integer not null default 100,
   draft_rounds     integer not null default 12,
+  -- League review of trades. Asymmetric on purpose: a trade nobody objects to
+  -- should go through, and blocking one takes a near-consensus.
+  trade_votes_to_approve integer not null default 5,
+  trade_votes_to_veto    integer not null default 9,
   created_at       timestamptz not null default now()
 );
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeftRight, Plus, Trash2, Check, X, Gavel, ShieldAlert,
-  Handshake, MessageSquare,
+  Handshake, MessageSquare, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { usePlayers } from '../lib/usePlayers'
@@ -171,12 +171,51 @@ function SideBuilder({
 /* ══════════════════════════════════════════════════════════════════════════
    Trade card in the feed
    ══════════════════════════════════════════════════════════════════════════ */
-function TradeCard({ trade, me, isCommish, teams, onAction, busyId }) {
+/* League vote progress. Two bars rather than one split bar: approvals and
+   vetoes race to DIFFERENT thresholds, so a single 50/50 bar would misrepresent
+   where a trade actually stands. */
+function VoteProgress({ approvals, vetoes, needApprove, needVeto }) {
+  const Row = ({ label, count, need, tone, bar }) => (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px]">
+        <span className={cx('font-semibold', tone)}>{label}</span>
+        <span className="text-slate-500">{count} of {need}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+        <div
+          className={cx('h-full transition-all', bar)}
+          style={{ width: `${Math.min(100, (count / Math.max(need, 1)) * 100)}%` }}
+        />
+      </div>
+    </div>
+  )
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      <Row label="Approve" count={approvals} need={needApprove}
+           tone="text-emerald-400" bar="bg-emerald-500" />
+      <Row label="Veto" count={vetoes} need={needVeto}
+           tone="text-rose-400" bar="bg-rose-500" />
+    </div>
+  )
+}
+
+function TradeCard({
+  trade, me, isCommish, teams, onAction, busyId, votes = [],
+  needApprove, needVeto, onVote,
+}) {
   const status = TRADE_STATUS_STYLES[trade.status] ?? TRADE_STATUS_STYLES.pending
   const isReceiver = trade.receiver_id === me
   const isProposer = trade.proposer_id === me
   const pending = trade.status === 'pending'
+  const voting = trade.status === 'accepted'
   const busy = busyId === trade.id
+
+  const approvals = votes.filter((v) => v.approve).length
+  const vetoes = votes.length - approvals
+  const myVote = votes.find((v) => v.voter_id === me)
+  // Both sides already agreed by proposing and accepting; letting them vote
+  // again would let a trade approve itself. Enforced in the RPC too.
+  const isParty = isProposer || isReceiver
 
   const proposer = findTeam(teams, { profileId: trade.proposer_id })
   const receiver = findTeam(teams, {
@@ -248,6 +287,47 @@ function TradeCard({ trade, me, isCommish, teams, onAction, busyId }) {
         </div>
       )}
 
+      {voting && (
+        <div className="space-y-2.5 border-t border-slate-800 bg-slate-950/40 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Both managers agreed — the league decides
+          </p>
+          <VoteProgress
+            approvals={approvals} vetoes={vetoes}
+            needApprove={needApprove} needVeto={needVeto}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {isParty ? (
+              <span className="text-xs text-slate-500">
+                You're in this trade, so you don't vote on it.
+              </span>
+            ) : (
+              <>
+                <Button
+                  variant={myVote?.approve === true ? 'primary' : 'neutral'}
+                  busy={busy}
+                  onClick={() => onVote(trade, true)}
+                >
+                  <ThumbsUp className="h-3.5 w-3.5" /> Approve
+                </Button>
+                <Button
+                  variant={myVote?.approve === false ? 'danger' : 'neutral'}
+                  busy={busy}
+                  onClick={() => onVote(trade, false)}
+                >
+                  <ThumbsDown className="h-3.5 w-3.5" /> Veto
+                </Button>
+                <span className="text-xs text-slate-500">
+                  {myVote
+                    ? `You voted to ${myVote.approve ? 'approve' : 'veto'} — click the other to change it.`
+                    : 'You have not voted.'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {(pending || isCommish) && (
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 bg-slate-950/40 px-4 py-2.5">
           {pending && isReceiver && (
@@ -304,6 +384,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
   const players = usePlayers(league.id)
   const me = membership.profile_id
   const [trades, setTrades] = useState([])
+  const [votes, setVotes] = useState([])
   const [rosters, setRosters] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('pending')
@@ -335,6 +416,12 @@ export default function TradeTracker({ league, membership, members, teams, toast
      side of the builder searches that team's roster rather than the whole
      league. Null means "no synced roster for this team" — the picker then falls
      back to the full universe rather than offering an empty list. */
+  const votesByTrade = useMemo(() => {
+    const map = {}
+    for (const v of votes) (map[v.trade_id] ??= []).push(v)
+    return map
+  }, [votes])
+
   const rosterByTeam = useMemo(() => {
     const map = new Map()
     for (const r of rosters) {
@@ -373,14 +460,18 @@ export default function TradeTracker({ league, membership, members, teams, toast
     // The embedded select pulls every asset with its trade, so the feed never
     // N+1s across trade_items. Rosters come too: the builder only offers players
     // a team actually owns, which needs espn_rosters.
-    const [tradesRes, rostersRes] = await Promise.all([
+    const [tradesRes, rostersRes, votesRes] = await Promise.all([
       supabase.from('trades').select('*, trade_items(*)')
         .eq('league_id', league.id).order('created_at', { ascending: false }),
       supabase.from('espn_rosters').select('espn_team_id, espn_player_id, season')
         .eq('league_id', league.id),
+      // No league filter needed: RLS scopes trade_votes to trades you can see.
+      supabase.from('trade_votes').select('*'),
     ])
     if (tradesRes.error) toast.error(tradesRes.error.message)
     else setTrades(tradesRes.data ?? [])
+    if (votesRes.error) toast.error(votesRes.error.message)
+    else setVotes(votesRes.data ?? [])
 
     if (rostersRes.error) toast.error(rostersRes.error.message)
     else {
@@ -556,6 +647,35 @@ export default function TradeTracker({ league, membership, members, teams, toast
     })?.team_name ?? 'Unknown',
   })
 
+  /**
+   * Cast a league vote.
+   *
+   * ⚠️ THE THRESHOLD CHECK IS SERVER-SIDE, in cast_trade_vote(). Counting here
+   * and flipping the status from the client would race: two managers voting at
+   * the same moment can both read 4 approvals, and neither would complete the
+   * trade. The RPC votes and decides in one transaction and returns the
+   * resulting status.
+   */
+  async function handleVote(trade, approve) {
+    setBusyId(trade.id)
+    try {
+      const { data, error } = await supabase.rpc('cast_trade_vote', {
+        p_trade: trade.id,
+        p_approve: approve,
+      })
+      if (error) throw error
+      if (data === 'completed') toast.success('That vote approved the trade.')
+      else if (data === 'vetoed') toast.success('That vote vetoed the trade.')
+      else toast.success(approve ? 'Voted to approve.' : 'Voted to veto.')
+      await load()
+      onDataChanged?.()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function handleAction(trade, action) {
     const CONFIRM = {
       veto: 'Veto this trade? Both managers will see it as vetoed.',
@@ -597,7 +717,11 @@ export default function TradeTracker({ league, membership, members, teams, toast
             by_commissioner: membership.role === 'commissioner' && trade.receiver_id !== me,
           },
         })
-        toast.success(`Trade ${NEXT.status}.`)
+        toast.success(
+          NEXT.status === 'accepted'
+            ? 'Accepted — the league votes on it now.'
+            : `Trade ${NEXT.status}.`
+        )
       }
       await load()
       onDataChanged?.()
@@ -608,10 +732,21 @@ export default function TradeTracker({ league, membership, members, teams, toast
     }
   }
 
-  const pendingTrades = trades.filter((t) => t.status === 'pending')
-  const settledTrades = trades.filter((t) => t.status !== 'pending')
-  const shown = tab === 'pending' ? pendingTrades : settledTrades
-  const myPendingCount = pendingTrades.filter((t) => t.receiver_id === me).length
+  // 'accepted' means the league is voting, so it belongs with the live trades,
+  // not the settled ones.
+  const openTrades = trades.filter((t) => t.status === 'pending' || t.status === 'accepted')
+  const settledTrades = trades.filter(
+    (t) => t.status !== 'pending' && t.status !== 'accepted'
+  )
+  const shown = tab === 'pending' ? openTrades : settledTrades
+
+  // Waiting on YOU: a trade you must answer, or a vote you have not cast.
+  const myPendingCount = trades.filter((t) => {
+    if (t.status === 'pending') return t.receiver_id === me
+    if (t.status !== 'accepted') return false
+    if (t.proposer_id === me || t.receiver_id === me) return false
+    return !(votesByTrade[t.id] ?? []).some((v) => v.voter_id === me)
+  }).length
 
   return (
     <div className="space-y-4">
@@ -621,7 +756,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
           <p className="text-sm text-slate-500">
             {myPendingCount > 0
               ? `${myPendingCount} trade${myPendingCount === 1 ? '' : 's'} waiting on you.`
-              : 'Players, FAAB and future picks.'}
+              : `Both managers agree, then ${league.trade_votes_to_approve ?? 5} approvals pass it — ${league.trade_votes_to_veto ?? 9} vetoes kill it.`}
           </p>
         </div>
         <Button variant="primary" onClick={() => setBuilderOpen(true)}>
@@ -631,8 +766,8 @@ export default function TradeTracker({ league, membership, members, teams, toast
 
       <div className="flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
         {[
-          ['pending', 'Pending', pendingTrades.length],
-          ['settled', 'Completed / Vetoed', settledTrades.length],
+          ['pending', 'Open', openTrades.length],
+          ['settled', 'Settled', settledTrades.length],
         ].map(([key, label, count]) => (
           <button
             key={key}
@@ -653,11 +788,11 @@ export default function TradeTracker({ league, membership, members, teams, toast
         <Card>
           <EmptyState
             icon={Handshake}
-            title={tab === 'pending' ? 'No pending trades' : 'Nothing settled yet'}
+            title={tab === 'pending' ? 'No open trades' : 'Nothing settled yet'}
           >
             {tab === 'pending'
-              ? 'Propose one and it will show up here for the other manager to accept.'
-              : 'Accepted, rejected and vetoed trades land here.'}
+              ? 'Propose one and it shows up here — first for the other manager, then for the league to vote on.'
+              : 'Approved, declined and vetoed trades land here.'}
           </EmptyState>
         </Card>
       ) : (
@@ -671,6 +806,10 @@ export default function TradeTracker({ league, membership, members, teams, toast
               teams={teams}
               onAction={handleAction}
               busyId={busyId}
+              votes={votesByTrade[t.id] ?? []}
+              needApprove={league.trade_votes_to_approve ?? 5}
+              needVeto={league.trade_votes_to_veto ?? 9}
+              onVote={handleVote}
             />
           ))}
         </div>

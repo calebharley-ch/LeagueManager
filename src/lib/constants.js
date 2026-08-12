@@ -44,12 +44,16 @@ export const ASSET_STYLES = {
   },
 }
 
+// A trade now passes through TWO gates: the other manager, then the league.
+// 'accepted' therefore means "both parties agreed, the league is voting" — not
+// "done". Renaming the enum in Postgres is not worth a migration, so the label
+// carries the meaning and this is the only place it is defined.
 export const TRADE_STATUS_STYLES = {
-  pending:   { label: 'Pending',   chip: 'bg-amber-500/15 text-amber-300 ring-amber-500/30' },
-  accepted:  { label: 'Accepted',  chip: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
-  completed: { label: 'Completed', chip: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
-  rejected:  { label: 'Rejected',  chip: 'bg-slate-500/15 text-slate-300 ring-slate-500/30' },
-  vetoed:    { label: 'Vetoed',    chip: 'bg-rose-500/15 text-rose-300 ring-rose-500/30' },
+  pending:   { label: 'Awaiting manager', chip: 'bg-amber-500/15 text-amber-300 ring-amber-500/30' },
+  accepted:  { label: 'League vote',      chip: 'bg-sky-500/15 text-sky-300 ring-sky-500/30' },
+  completed: { label: 'Approved',         chip: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
+  rejected:  { label: 'Declined',         chip: 'bg-slate-500/15 text-slate-300 ring-slate-500/30' },
+  vetoed:    { label: 'Vetoed',           chip: 'bg-rose-500/15 text-rose-300 ring-rose-500/30' },
 }
 
 // The rulebook stores what the league has agreed; it is not a voting engine.
