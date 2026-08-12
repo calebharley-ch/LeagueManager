@@ -154,9 +154,23 @@ ESPN's missing CORS headers, which would block a browser request outright.
 The UI reads `leagues.espn_connected` — a boolean — to show connection state.
 That is exactly enough, and it leaks nothing.
 
-Cookies expire every few weeks. When syncs start failing, reconnect with fresh
-ones from DevTools → Application → Cookies on `fantasy.espn.com`. Public leagues
-need no cookies at all — just the ESPN league id.
+**How long the cookies last is not documented by ESPN**, and an earlier version
+of this file claimed "a few weeks" — that was a guess, not a measurement. They
+appear to be persistent across sessions. To find out for yours, read the
+**Expires** column next to `espn_s2` in DevTools → Application → Cookies on
+`fantasy.espn.com`.
+
+What definitely kills them early:
+
+- **signing out of ESPN in that browser** — grab the cookie somewhere you stay
+  signed in
+- changing your ESPN password
+- clearing cookies, or a privacy extension doing it for you
+
+When a sync starts failing with HTTP 401/403, reconnect with fresh values. The
+function is built for this: it reports the credential failure specifically, and
+the player universe still syncs without cookies, so only rosters go stale.
+Public leagues need no cookies at all — just the ESPN league id.
 
 ### Measured ESPN API behaviour
 
