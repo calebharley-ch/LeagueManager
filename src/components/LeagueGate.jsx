@@ -22,7 +22,14 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
   // it look like there was still a step to complete, and people went hunting
   // for a code that does not exist. Creating a second league is a rare thing
   // and can afford two clicks.
-  const [adding, setAdding] = useState(!hasLeagues)
+  //
+  // ⚠️ DERIVED, NOT INITIALISED FROM hasLeagues. useState only reads its
+  // initial value on the first render, so leaving a league (expands, correctly)
+  // and rejoining without this component unmounting left the form stuck open
+  // with a league sitting right above it.
+  const [askedToAdd, setAskedToAdd] = useState(false)
+  const adding = askedToAdd || !hasLeagues
+  const setAdding = setAskedToAdd
   const [mode, setMode] = useState('create')
   const [busy, setBusy] = useState(false)
 
