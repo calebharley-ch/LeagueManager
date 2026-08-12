@@ -77,6 +77,25 @@ export default function Auth({ onError, invite, inviteToken }) {
     }
   }
 
+  /** Email a recovery link. Deliberately does not reveal whether the address
+   *  exists — Supabase returns success either way, and so do we. */
+  async function sendReset() {
+    if (!email.trim()) return onError?.('Enter your email address first.')
+    setNotice('')
+    setBusy(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: authRedirectTo(),
+      })
+      if (error) throw error
+      setNotice(`If an account exists for ${email.trim()}, a reset link is on its way.`)
+    } catch (err) {
+      onError?.(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setNotice('')
@@ -250,6 +269,17 @@ export default function Auth({ onError, invite, inviteToken }) {
             <Button type="submit" variant="primary" busy={busy} className="w-full py-2">
               {isSignUp ? 'Create account' : 'Sign in'}
             </Button>
+
+            {!isSignUp && (
+              <button
+                type="button"
+                onClick={sendReset}
+                disabled={busy}
+                className="w-full text-center text-xs text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline disabled:opacity-50"
+              >
+                Forgot your password?
+              </button>
+            )}
           </form>
         </Card>
 

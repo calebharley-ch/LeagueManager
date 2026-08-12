@@ -7,6 +7,7 @@ import { supabase } from './supabaseClient'
 import { buildTeams } from './lib/teams'
 import { captureInviteFromUrl, getPendingInvite, clearPendingInvite } from './lib/invite'
 import Auth from './components/Auth'
+import SetPassword from './components/SetPassword'
 import LeagueGate from './components/LeagueGate'
 import LeagueSettings from './components/LeagueSettings'
 import TradeTracker from './components/TradeTracker'
@@ -99,6 +100,8 @@ export default function App() {
 
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(false)
+  // True only between clicking a recovery link and saving the new password.
+  const [recovering, setRecovering] = useState(false)
 
   const [memberships, setMemberships] = useState([])
   const [membershipsReady, setMembershipsReady] = useState(false)
@@ -172,7 +175,12 @@ export default function App() {
       setSession(data.session ?? null)
       setAuthReady(true)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, next) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      // A recovery link signs you IN, with a session that exists only to let
+      // you set a new password. Without catching this event the user lands on
+      // the normal app, still not knowing their password, and the reset silently
+      // achieves nothing.
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
       setSession(next ?? null)
       setAuthReady(true)
       if (!next) {
@@ -297,6 +305,22 @@ export default function App() {
   /* Render ----------------------------------------------------------------- */
   if (!authReady) {
     return <div className="flex min-h-full items-center justify-center"><Loading label="Starting up…" /></div>
+  }
+
+  // Must come BEFORE the league gate: someone resetting their password should
+  // set it, not be asked to pick a league first.
+  if (session && recovering) {
+    return (
+      <>
+        <SetPassword
+          email={session.user?.email}
+          toast={toast}
+          onDone={() => setRecovering(false)}
+          onCancel={() => setRecovering(false)}
+        />
+        <ToastStack items={items} dismiss={dismiss} />
+      </>
+    )
   }
 
   if (!session) {
