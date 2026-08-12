@@ -7,11 +7,12 @@ import { supabase } from '../supabaseClient'
 import { usePlayers } from '../lib/usePlayers'
 import {
   findTeam, ownPicksTradedAway, tradesAwaitingEspn, describeEspnWork,
+  availablePicks, pickKey, parsePickKey, labelPick,
 } from '../lib/teams'
 import PlayerPicker from './PlayerPicker'
 import { logAudit, AUDIT_ACTIONS } from '../lib/audit'
 import {
-  ASSET_STYLES, TRADE_STATUS_STYLES, POSITIONS, PICK_ROUNDS, PICK_YEARS,
+  ASSET_STYLES, TRADE_STATUS_STYLES, POSITIONS, PICK_YEARS,
   MAX_OWN_PICKS_TRADED, describeAsset, timeAgo,
 } from '../lib/constants'
 import {
@@ -27,17 +28,17 @@ const newAsset = (type) => ({
   player_position: 'RB',
   espn_player_id: null,
   faab_amount: '',
-  pick_year: PICK_YEARS[0],
-  pick_round: 1,
-  // A team key from lib/teams ("espn:7" or "member:<uuid>"), not a profile id —
-  // the original owner may be a team nobody has claimed.
-  pick_original_team_key: '',
+  // "2027|3|espn:7" — year, round and whose pick it originally was. Chosen from
+  // the sending team's real holdings rather than typed in piece by piece.
+  pick_ref: '',
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
    Asset row — one editable line in the builder
    ══════════════════════════════════════════════════════════════════════════ */
-function AssetEditor({ asset, teams, onChange, onRemove, players, rosterIds, rosterLabel }) {
+function AssetEditor({
+  asset, teams, onChange, onRemove, players, rosterIds, rosterLabel, picks = [],
+}) {
   const set = (patch) => onChange({ ...asset, ...patch })
   const style = ASSET_STYLES[asset.item_type]
 
@@ -88,24 +89,32 @@ function AssetEditor({ asset, teams, onChange, onRemove, players, rosterIds, ros
           </div>
         )}
 
+        {/* ⚠️ ONLY PICKS THIS TEAM ACTUALLY HOLDS. This used to be three free
+            dropdowns — year, round, original owner — which let anyone offer a
+            pick they had already traded away, or one that never existed. The
+            list comes from derived ownership minus anything already promised. */}
         {asset.item_type === 'pick' && (
-          <>
-            <Select value={asset.pick_year} onChange={(e) => set({ pick_year: Number(e.target.value) })} aria-label="Pick year">
-              {PICK_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-            </Select>
-            <Select value={asset.pick_round} onChange={(e) => set({ pick_round: Number(e.target.value) })} aria-label="Pick round">
-              {PICK_ROUNDS.map((r) => <option key={r} value={r}>Round {r}</option>)}
-            </Select>
+          <div className="sm:col-span-2">
             <Select
-              className="sm:col-span-2"
-              value={asset.pick_original_team_key}
-              onChange={(e) => set({ pick_original_team_key: e.target.value })}
-              aria-label="Original owner"
+              value={asset.pick_ref}
+              onChange={(e) => set({ pick_ref: e.target.value })}
+              aria-label="Draft pick"
+              disabled={picks.length === 0}
             >
-              <option value="">Original owner — unspecified</option>
-              {teams.map((t) => <option key={t.key} value={t.key}>{t.team_name}</option>)}
+              <option value="">
+                {picks.length === 0 ? 'No picks available to trade' : 'Select a pick…'}
+              </option>
+              {picks.map((p) => {
+                const k = pickKey(p.year, p.round, p.originKey)
+                return <option key={k} value={k}>{labelPick(p)}</option>
+              })}
             </Select>
-          </>
+            {picks.length === 0 && (
+              <p className="mt-1 text-[11px] text-amber-400">
+                {rosterLabel} has no unpromised {PICK_YEARS.join('/')} picks left.
+              </p>
+            )}
+          </div>
         )}
       </div>
       <IconButton label="Remove asset" onClick={onRemove}>
@@ -120,7 +129,7 @@ function AssetEditor({ asset, teams, onChange, onRemove, players, rosterIds, ros
    ══════════════════════════════════════════════════════════════════════════ */
 function SideBuilder({
   heading, subheading, assets, setAssets, teams, players, rosterIds, rosterLabel,
-  rosterMissing,
+  rosterMissing, picks = [],
 }) {
   const add = (type) => setAssets([...assets, newAsset(type)])
   const update = (key, next) => setAssets(assets.map((a) => (a.key === key ? next : a)))
@@ -153,6 +162,13 @@ function SideBuilder({
             players={players}
             rosterIds={rosterIds}
             rosterLabel={rosterLabel}
+            // Hide picks already chosen on another row, but keep this row's own
+            // selection so it does not vanish from its own dropdown.
+            picks={picks.filter((p) => {
+              const k = pickKey(p.year, p.round, p.originKey)
+              if (k === a.pick_ref) return true
+              return !assets.some((other) => other.pick_ref === k)
+            })}
             onChange={(next) => update(a.key, next)}
             onRemove={() => remove(a.key)}
           />
@@ -474,13 +490,29 @@ export default function TradeTracker({ league, membership, members, teams, toast
     [teams, trades, myTeam]
   )
   const buildersOwnPicks = useMemo(
-    () => sideA.filter((a) =>
-      a.item_type === 'pick' &&
-      // Unspecified origin means your own pick, which is what people mean when
-      // they do not fill it in.
-      (!a.pick_original_team_key || a.pick_original_team_key === myTeam?.key)
-    ).length,
+    () => sideA.filter((a) => {
+      if (a.item_type !== 'pick') return false
+      const ref = parsePickKey(a.pick_ref)
+      // Only YOUR OWN picks count against the three-pick cap; ones you acquired
+      // from someone else do not.
+      return ref ? ref.originKey === myTeam?.key : false
+    }).length,
     [sideA, myTeam]
+  )
+
+  /* What each side can actually offer. Derived ownership minus anything already
+     promised in an open trade — see availablePicks(). */
+  const myPicks = useMemo(
+    () => availablePicks({
+      teams, trades, teamKey: myTeam?.key, rounds: league.draft_rounds ?? 12,
+    }),
+    [teams, trades, myTeam, league.draft_rounds]
+  )
+  const theirPicks = useMemo(
+    () => availablePicks({
+      teams, trades, teamKey: receiverTeam?.key, rounds: league.draft_rounds ?? 12,
+    }),
+    [teams, trades, receiverTeam, league.draft_rounds]
   )
   const picksLeft = MAX_OWN_PICKS_TRADED - committedPicks - buildersOwnPicks
 
@@ -538,11 +570,13 @@ export default function TradeTracker({ league, membership, members, teams, toast
       if (!Number.isFinite(amt) || amt <= 0) throw new Error('FAAB must be a positive number.')
       return { ...base, faab_amount: Math.round(amt) }
     }
-    const origin = teams.find((t) => t.key === asset.pick_original_team_key) ?? null
+    const ref = parsePickKey(asset.pick_ref)
+    if (!ref) throw new Error('Choose which draft pick you are trading.')
+    const origin = teams.find((t) => t.key === ref.originKey) ?? null
     return {
       ...base,
-      pick_year: Number(asset.pick_year),
-      pick_round: Number(asset.pick_round),
+      pick_year: ref.year,
+      pick_round: ref.round,
       // Whichever identity that team has. Both columns null means "unspecified",
       // which lib/teams reads as the sender's own pick.
       pick_original_owner_id: origin?.profile_id ?? null,
@@ -966,6 +1000,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
               rosterIds={myRosterIds}
               rosterLabel={myTeam?.team_name ?? 'your'}
               rosterMissing={!myRosterIds && players.players.length > 0}
+              picks={myPicks}
             />
             <SideBuilder
               heading="You receive"
@@ -979,6 +1014,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
               rosterIds={theirRosterIds}
               rosterLabel={receiverTeam?.team_name ?? 'their'}
               rosterMissing={!!receiverTeam && !theirRosterIds && players.players.length > 0}
+              picks={theirPicks}
             />
           </div>
 

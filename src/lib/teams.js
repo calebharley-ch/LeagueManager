@@ -226,6 +226,58 @@ export function ownPicksTradedAway({ teams, trades = [], teamKey, excludeTradeId
   return n
 }
 
+/** Stable identity for one pick, used as a form value. */
+export const pickKey = (year, round, originKey) => `${year}|${round}|${originKey}`
+
+export function parsePickKey(value) {
+  const [year, round, ...rest] = String(value ?? '').split('|')
+  if (!year || !round) return null
+  return { year: Number(year), round: Number(round), originKey: rest.join('|') }
+}
+
+/**
+ * Picks a team can actually offer right now.
+ *
+ * ⚠️ HOLDINGS MINUS PROMISES. derivePicks() reflects COMPLETED trades, so a
+ * pick promised in a trade that is still pending or out for a league vote is
+ * still shown as held — offering it again would let one manager sell the same
+ * pick to two teams and only discover the conflict when both completed.
+ */
+export function availablePicks({
+  teams, trades = [], teamKey, rounds = 12, years = PICK_YEARS,
+}) {
+  if (!teamKey) return []
+  const held = derivePicks({ teams, trades, rounds, years })[teamKey] ?? []
+
+  const promised = new Set()
+  for (const trade of trades) {
+    // Completed trades are already reflected in `held`; counting them here
+    // would remove the pick twice.
+    if (trade.status !== 'pending' && trade.status !== 'accepted') continue
+    const { from, to } = partiesOf(trade, teams)
+    if (!from || !to) continue
+    for (const item of trade.trade_items ?? []) {
+      if (item.item_type !== 'pick') continue
+      const giver = item.side === 'A' ? from : to
+      if (giver.key !== teamKey) continue
+      const origin = findTeam(teams, {
+        profileId: item.pick_original_owner_id,
+        espnTeamId: item.pick_original_espn_team_id,
+      }) ?? giver
+      promised.add(pickKey(item.pick_year, item.pick_round, origin.key))
+    }
+  }
+
+  return held.filter((p) => !promised.has(pickKey(p.year, p.round, p.originKey)))
+}
+
+/** "2027 3rd (Bandits)" — how a pick reads in a dropdown. */
+export function labelPick(p) {
+  return p.own
+    ? `${p.year} ${ordinal(p.round)}`
+    : `${p.year} ${ordinal(p.round)} (${p.originName})`
+}
+
 /**
  * Completed trades the commissioner still has to apply inside ESPN.
  *
