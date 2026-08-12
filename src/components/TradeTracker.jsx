@@ -600,19 +600,9 @@ export default function TradeTracker({ league, membership, members, teams, toast
         .insert(rows.map((r) => ({ ...r, trade_id: tradeId })))
       if (itemsErr) throw itemsErr
 
-      await logAudit({
-        leagueId: league.id,
-        actorId: me,
-        action: AUDIT_ACTIONS.TRADE_PROPOSED,
-        entityType: 'trade',
-        entityId: tradeId,
-        details: {
-          to: receiverTeam.team_name,
-          to_has_account: receiverTeam.claimed,
-          assets_out: sideA.length,
-          assets_in: sideB.length,
-        },
-      })
+      // ⚠️ DELIBERATELY NOT AUDITED. The log is a record of what HAPPENED to
+      // the league, not of every offer made. Most proposals never become
+      // anything, and logging them buried the entries that matter.
 
       toast.success(`Trade proposed to ${receiverTeam.team_name}.`)
 
@@ -696,9 +686,12 @@ export default function TradeTracker({ league, membership, members, teams, toast
         })
         toast.success('Trade deleted.')
       } else {
+        // `audit: null` = a step along the way, not an outcome. Accepting only
+        // opens the league vote and declining ends a private negotiation —
+        // neither changed anything about the league, so neither is logged.
         const NEXT = {
-          accept:   { status: 'accepted',  audit: AUDIT_ACTIONS.TRADE_ACCEPTED },
-          reject:   { status: 'rejected',  audit: AUDIT_ACTIONS.TRADE_REJECTED },
+          accept:   { status: 'accepted',  audit: null },
+          reject:   { status: 'rejected',  audit: null },
           complete: { status: 'completed', audit: AUDIT_ACTIONS.TRADE_COMPLETED },
           veto:     { status: 'vetoed',    audit: AUDIT_ACTIONS.TRADE_VETOED },
         }[action]
@@ -709,14 +702,16 @@ export default function TradeTracker({ league, membership, members, teams, toast
           .eq('id', trade.id)
         if (error) throw error
 
-        await logAudit({
-          leagueId: league.id, actorId: me, action: NEXT.audit,
-          entityType: 'trade', entityId: trade.id,
-          details: {
-            ...partyNames(trade),
-            by_commissioner: membership.role === 'commissioner' && trade.receiver_id !== me,
-          },
-        })
+        if (NEXT.audit) {
+          await logAudit({
+            leagueId: league.id, actorId: me, action: NEXT.audit,
+            entityType: 'trade', entityId: trade.id,
+            details: {
+              ...partyNames(trade),
+              by_commissioner: membership.role === 'commissioner' && trade.receiver_id !== me,
+            },
+          })
+        }
         toast.success(
           NEXT.status === 'accepted'
             ? 'Accepted — the league votes on it now.'

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Save, ShieldCheck, User, Users, LogOut, Trophy, UserCheck, UserPlus, Link2, Mail,
-  MailCheck, Send, Trash2, UserMinus,
+  MailCheck, Send, Trash2, UserMinus, ShieldPlus, ShieldOff,
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { timeAgo } from '../lib/constants'
@@ -123,6 +123,37 @@ export default function Profile({
       setEmails((m) => ({ ...m, [t.espn_team_id]: '' }))
       toast.success('Invite cleared.')
       await loadInvites()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSendingId(null)
+    }
+  }
+
+  /**
+   * Promote a manager to co-commissioner, or step one back down.
+   *
+   * The database guards this too — a trigger blocks role changes by
+   * non-commissioners and refuses to remove the last one. Without that guard
+   * the existing "edit your own membership" policy would have let any manager
+   * set their own role and take over the league.
+   */
+  async function setRole(t, role) {
+    const promoting = role === 'commissioner'
+    if (!window.confirm(
+      promoting
+        ? `Make ${t.team_name} a commissioner?\n\nThey get everything you can do: ` +
+          `ESPN sync, invites, rules, and overriding trades. There is no ranking ` +
+          `between commissioners.`
+        : `Step ${t.team_name} down to manager?\n\nThey keep their team and their history.`
+    )) return
+    setSendingId(t.espn_team_id ?? t.key)
+    try {
+      const { error } = await supabase
+        .from('league_members').update({ role }).eq('id', t.member.id)
+      if (error) throw error
+      toast.success(promoting ? `${t.team_name} is now a commissioner.` : `${t.team_name} is now a manager.`)
+      await onChanged?.()
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -326,13 +357,30 @@ export default function Profile({
                             commissioner removing themselves would strand the
                             league with nobody who can administer it. */}
                         {isCommish && t.profile_id !== membership.profile_id && t.member && (
-                          <IconButton
-                            label={`Remove ${t.team_name} from the league`}
-                            disabled={sendingId === (t.espn_team_id ?? t.key)}
-                            onClick={() => removeMember(t)}
-                          >
-                            <UserMinus className="h-4 w-4" />
-                          </IconButton>
+                          <>
+                            <IconButton
+                              label={
+                                t.role === 'commissioner'
+                                  ? `Step ${t.team_name} down to manager`
+                                  : `Make ${t.team_name} a commissioner`
+                              }
+                              disabled={sendingId === (t.espn_team_id ?? t.key)}
+                              onClick={() =>
+                                setRole(t, t.role === 'commissioner' ? 'manager' : 'commissioner')
+                              }
+                            >
+                              {t.role === 'commissioner'
+                                ? <ShieldOff className="h-4 w-4" />
+                                : <ShieldPlus className="h-4 w-4" />}
+                            </IconButton>
+                            <IconButton
+                              label={`Remove ${t.team_name} from the league`}
+                              disabled={sendingId === (t.espn_team_id ?? t.key)}
+                              onClick={() => removeMember(t)}
+                            >
+                              <UserMinus className="h-4 w-4" />
+                            </IconButton>
+                          </>
                         )}
                       </>
                     ) : inv?.invited_at ? (

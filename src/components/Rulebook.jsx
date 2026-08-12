@@ -225,9 +225,13 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
             {rules.length === 1 ? '' : 's'} on the books.
           </p>
         </div>
-        <Button variant="primary" onClick={openNew}>
-          <Plus className="h-4 w-4" /> Add rule
-        </Button>
+        {/* Commissioner only, matching the RLS. Showing this to a manager would
+            just produce a policy violation after they had typed the whole rule. */}
+        {isCommish && (
+          <Button variant="primary" onClick={openNew}>
+            <Plus className="h-4 w-4" /> Add rule
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -257,9 +261,11 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
       ) : grouped.length === 0 ? (
         <Card>
           <EmptyState icon={BookOpen} title={rules.length === 0 ? 'The book is empty' : 'Nothing matches'}>
-            {rules.length === 0
-              ? 'Add your keeper rules, draft format and punishments so nobody has to remember them in August.'
-              : 'Try widening the filter.'}
+            {rules.length > 0
+              ? 'Try widening the filter.'
+              : isCommish
+                ? 'Add your keeper rules, draft format and punishments so nobody has to remember them in August.'
+                : 'Your commissioner has not written any rules down yet.'}
           </EmptyState>
         </Card>
       ) : (
