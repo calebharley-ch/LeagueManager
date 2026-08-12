@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import { buildTeams } from './lib/teams'
+import { captureInviteFromUrl, getPendingInvite, clearPendingInvite } from './lib/invite'
 import Auth from './components/Auth'
 import LeagueGate from './components/LeagueGate'
 import LeagueSettings from './components/LeagueSettings'
@@ -113,6 +114,54 @@ export default function App() {
 
   const [refreshKey, setRefreshKey] = useState(0)
   const bumpRefresh = useCallback(() => setRefreshKey((n) => n + 1), [])
+
+  /* Invite links ------------------------------------------------------------
+     Captured once on mount, before anything else can navigate. `invitePreview`
+     is what the sign-in screen shows so the recipient knows what they are
+     joining before being asked for a password. */
+  const [inviteToken, setInviteToken] = useState(() => captureInviteFromUrl())
+  const [invitePreview, setInvitePreview] = useState(null)
+  const redeemedRef = useRef(false)
+
+  useEffect(() => {
+    if (!inviteToken) return
+    let alive = true
+    supabase.rpc('invite_preview', { p_token: inviteToken }).then(({ data, error }) => {
+      if (!alive || error) return
+      const row = Array.isArray(data) ? data[0] : data
+      if (row) setInvitePreview(row)
+    })
+    return () => { alive = false }
+  }, [inviteToken])
+
+  // Redeem as soon as there is a session. Runs once per token — redeem_invite
+  // is idempotent server-side, but re-firing it on every render would hammer
+  // the RPC for no reason.
+  useEffect(() => {
+    if (!session?.user || !inviteToken || redeemedRef.current) return
+    redeemedRef.current = true
+    ;(async () => {
+      const { data, error } = await supabase.rpc('redeem_invite', { p_token: inviteToken })
+      if (error) {
+        toast.error(error.message)
+        // A dead or already-claimed invite must not haunt every future load.
+        clearPendingInvite()
+        setInviteToken(null)
+        return
+      }
+      clearPendingInvite()
+      setInviteToken(null)
+      setInvitePreview(null)
+      if (data) {
+        setLeagueId(data)
+        try { localStorage.setItem(ACTIVE_LEAGUE_KEY, data) } catch { /* private mode */ }
+      }
+      // bumpRefresh re-runs loadMemberships (it depends on refreshKey), which
+      // is how the brand-new membership appears without a page reload.
+      bumpRefresh()
+      toast.success('You\'re in. Welcome to the league.')
+    })()
+  }, [session, inviteToken, toast, bumpRefresh])
   const [badges, setBadges] = useState({ trades: 0, rules: 0 })
 
   /* Session ---------------------------------------------------------------- */
@@ -148,7 +197,9 @@ export default function App() {
     setMembershipsReady(true)
   }, [session])
 
-  useEffect(() => { loadMemberships() }, [loadMemberships])
+  // refreshKey is in here so redeeming an invite surfaces the new membership
+  // immediately, rather than after a manual reload.
+  useEffect(() => { loadMemberships() }, [loadMemberships, refreshKey])
 
   const membership = useMemo(
     () => memberships.find((m) => m.league_id === leagueId) ?? null,
@@ -251,7 +302,7 @@ export default function App() {
   if (!session) {
     return (
       <>
-        <Auth onError={toast.error} />
+        <Auth onError={toast.error} invite={invitePreview} />
         <ToastStack items={items} dismiss={dismiss} />
       </>
     )

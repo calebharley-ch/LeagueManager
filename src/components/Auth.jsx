@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Trophy, Mail, Lock, User } from 'lucide-react'
 import { supabase, authRedirectTo } from '../supabaseClient'
+import { useEnabledProviders } from '../lib/authProviders'
 import { Button, Card, Field, Input } from './ui'
 
 // Providers to offer. Comment one out and its button disappears — but the
@@ -35,8 +36,16 @@ const OAUTH_PROVIDERS = [
  * from here — with email confirmation on there is no session yet at signUp, so
  * the insert would fail RLS and leave an auth user with no profile.
  */
-export default function Auth({ onError }) {
-  const [mode, setMode] = useState('signin')
+export default function Auth({ onError, invite }) {
+  // Only offer providers the project actually has on. A disabled one redirects
+  // the browser to a JSON error page that no catch block here can intercept.
+  const { providers: enabled, loading: providersLoading } = useEnabledProviders()
+  const oauthProviders = OAUTH_PROVIDERS.filter(
+    (p) => enabled === null || enabled.includes(p.id)
+  )
+
+  // An invited person almost certainly has no account yet.
+  const [mode, setMode] = useState(invite ? 'signup' : 'signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -111,6 +120,21 @@ export default function Auth({ onError }) {
           <p className="text-sm text-slate-500">Trades, rules and the receipts for both.</p>
         </div>
 
+        {/* Arrived from an invite link. Say what they are joining BEFORE asking
+            for a password — "create an account" with no context is where people
+            bounce. The team is already chosen for them. */}
+        {invite && (
+          <div className="mb-4 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm ring-1 ring-emerald-500/30">
+            <p className="font-semibold text-emerald-300">
+              You're invited to {invite.league_name}
+            </p>
+            <p className="mt-0.5 text-emerald-200/70">
+              Create an account and you'll join as <strong>{invite.team_name}</strong> —
+              no invite code needed.
+            </p>
+          </div>
+        )}
+
         <Card className="p-5">
           <div className="mb-4 flex rounded-lg bg-slate-950/60 p-1 ring-1 ring-slate-800">
             {[['signin', 'Sign in'], ['signup', 'Register']].map(([key, label]) => (
@@ -134,10 +158,10 @@ export default function Auth({ onError }) {
             </p>
           )}
 
-          {OAUTH_PROVIDERS.length > 0 && (
+          {!providersLoading && oauthProviders.length > 0 && (
             <>
               <div className="space-y-2">
-                {OAUTH_PROVIDERS.map((p) => (
+                {oauthProviders.map((p) => (
                   <Button
                     key={p.id}
                     type="button"

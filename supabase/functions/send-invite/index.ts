@@ -118,8 +118,46 @@ Deno.serve(async (req) => {
         continue
       }
 
-      const link = APP_URL
-        ? `<p style="margin:20px 0"><a href="${esc(APP_URL)}" style="background:#10b981;color:#04140d;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Join the league</a></p>`
+      // ⚠️ THE ROW MUST EXIST BEFORE THE EMAIL IS COMPOSED. The token is the
+      // credential in the link, so it has to be read (or minted) first. The
+      // send timestamp is written afterwards, only on success.
+      let token: string | null = null
+      {
+        const { data: row } = await serviceClient
+          .from('league_invites')
+          .select('token')
+          .eq('league_id', leagueId).eq('espn_team_id', espnTeamId)
+          .maybeSingle()
+
+        if (row?.token) {
+          token = row.token
+          // Address may have been corrected since the last send.
+          await serviceClient.from('league_invites')
+            .update({ email, updated_at: new Date().toISOString() })
+            .eq('league_id', leagueId).eq('espn_team_id', espnTeamId)
+        } else {
+          const { data: made, error: mkErr } = await serviceClient
+            .from('league_invites')
+            .insert({ league_id: leagueId, espn_team_id: espnTeamId, email, invited_by: user.id })
+            .select('token').single()
+          if (mkErr || !made) {
+            results.push({
+              espn_team_id: espnTeamId, ok: false,
+              error: `Could not create the invite: ${mkErr?.message ?? 'unknown'}`,
+            })
+            continue
+          }
+          token = made.token
+        }
+      }
+
+      // One-click join. Falls back to the league code only when APP_URL is
+      // unset, because a token with nowhere to point is useless.
+      const joinUrl = APP_URL
+        ? `${APP_URL}${APP_URL.includes('?') ? '&' : '?'}invite=${token}`
+        : ''
+      const link = joinUrl
+        ? `<p style="margin:20px 0"><a href="${esc(joinUrl)}" style="background:#10b981;color:#04140d;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:700">Join the league</a></p>`
         : ''
 
       const htmlContent = `
@@ -131,11 +169,16 @@ Deno.serve(async (req) => {
     league history for <strong>${esc(league.name)}</strong>. Your team
     <strong>${esc(teamName)}</strong> is already in there.
   </p>
+  <p style="margin:0 0 6px">
+    Click below, create an account, and you're in as <strong>${esc(teamName)}</strong> —
+    no code to type, no team to pick.
+  </p>
+  ${link}
+  ${joinUrl ? `<p style="font-size:12px;color:#94a3b8;word-break:break-all;margin:0 0 8px">Or paste this link: ${esc(joinUrl)}</p>` : `
   <p style="margin:0 0 6px">Create an account and join with this code:</p>
   <p style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:.15em;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:12px 16px;display:inline-block;margin:0 0 8px">
     ${esc(league.invite_code)}
-  </p>
-  ${link}
+  </p>`}
   <p style="font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px;margin-top:20px">
     Not expecting this? You can ignore it — nothing happens until you sign up.
   </p>
@@ -146,8 +189,9 @@ Deno.serve(async (req) => {
         `${membership.team_name} set it up to track trades, keeper rules and league history.`,
         `Your team ${teamName} is already in there.`,
         ``,
-        `Join with this invite code: ${league.invite_code}`,
-        APP_URL ? `\n${APP_URL}` : '',
+        joinUrl
+          ? `Join here — you'll be added as ${teamName} automatically:\n${joinUrl}`
+          : `Create an account and join with this invite code: ${league.invite_code}`,
         `\nNot expecting this? Ignore it — nothing happens until you sign up.`,
       ].filter(Boolean).join('\n')
 
@@ -177,23 +221,23 @@ Deno.serve(async (req) => {
           continue
         }
 
-        // Record the address and the send. Upsert so re-inviting updates rather
-        // than erroring on the primary key.
+        // Stamp the send. The row already exists — it was created above to mint
+        // the token — so this is an update, not an upsert. Only reached on a
+        // successful send, so invited_at means "we actually mailed it".
         const { data: existing } = await serviceClient
           .from('league_invites')
           .select('send_count')
           .eq('league_id', leagueId).eq('espn_team_id', espnTeamId)
           .maybeSingle()
 
-        await serviceClient.from('league_invites').upsert({
-          league_id: leagueId,
-          espn_team_id: espnTeamId,
-          email,
-          invited_at: new Date().toISOString(),
-          invited_by: user.id,
-          send_count: (existing?.send_count ?? 0) + 1,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'league_id,espn_team_id' })
+        await serviceClient.from('league_invites')
+          .update({
+            invited_at: new Date().toISOString(),
+            invited_by: user.id,
+            send_count: (existing?.send_count ?? 0) + 1,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('league_id', leagueId).eq('espn_team_id', espnTeamId)
 
         results.push({ espn_team_id: espnTeamId, ok: true })
       } catch (err) {
