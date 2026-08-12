@@ -311,10 +311,12 @@ function TradeCard({
             </Button>
             <span className="text-xs text-slate-500">
               {myVote
-                ? `You voted to ${myVote.approve ? 'approve' : 'veto'} — click the other to change it.`
-                : isProposer || isReceiver
-                  ? "You're in this trade — you still get a vote."
-                  : 'You have not voted.'}
+                ? (isProposer || isReceiver) && myVote.approve
+                  // Their vote was recorded by proposing or accepting, so
+                  // "you voted" would look like something they never did.
+                  ? 'Agreeing to the trade counted as your approval — you can still switch to veto.'
+                  : `You voted to ${myVote.approve ? 'approve' : 'veto'} — click the other to change it.`
+                : 'You have not voted.'}
             </span>
           </div>
         </div>
