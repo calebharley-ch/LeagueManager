@@ -30,12 +30,10 @@ select
   'passed'::rule_status
 from target t
 cross join (values
+  -- One E'' literal, ASCII only. See the note in 002 for why.
   (
     'Draft pick trading',
-    E'• Only next year''s draft picks may be traded. Picks two or more drafts out are not tradeable.\n'
-    E'• A team may trade away at most three of its own picks.\n'
-    E'• Picks acquired from another team do not count against that limit — the cap is on selling your own draft.\n'
-    E'• A pick counts as committed as soon as the trade is proposed, not when it is completed.',
+    E'- Only next year''s draft picks may be traded. Picks two or more drafts out are not tradeable.\n- A team may trade away at most three of its own picks.\n- Picks acquired from another team do not count against that limit; the cap is on selling your own draft.\n- A pick counts as committed as soon as the trade is proposed, not when it is completed.',
     'Draft'
   )
 ) as r(title, description, category)

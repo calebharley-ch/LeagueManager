@@ -28,13 +28,14 @@ select
   'passed'::rule_status
 from target t
 cross join (values
+  -- ⚠️ ONE E'' LITERAL PER VALUE, ASCII ONLY.
+  -- Adjacent E'' literals are NOT concatenated the way plain string constants
+  -- are; Postgres raises a syntax error at the second one. And a non-ASCII
+  -- bullet survives a UTF-8 round trip only if every tool in the chain agrees
+  -- on the encoding, which on Windows they do not.
   (
     'Keeper rules',
-    E'• A player cannot be kept two years in a row.\n'
-    E'• A first-round draft pick cannot be kept.\n'
-    E'• A free agent counts as a 9th-round pick.\n'
-    E'• If a player is traded, he still counts at his original draft position.\n'
-    E'• If a player is ever dropped, he always counts toward the round he was originally drafted in.',
+    E'- A player cannot be kept two years in a row.\n- A first-round draft pick cannot be kept.\n- A free agent counts as a 9th-round pick.\n- If a player is traded, he still counts at his original draft position.\n- If a player is ever dropped, he always counts toward the round he was originally drafted in.',
     'Draft'
   ),
   (
@@ -44,8 +45,7 @@ cross join (values
   ),
   (
     'Last-place punishment',
-    E'The last-place finisher gives a 30-minute presentation about everyone''s lives, '
-    E'delivered before the draft.',
+    'The last-place finisher gives a 30-minute presentation about everyone''s lives, delivered before the draft.',
     'Governance'
   )
 ) as r(title, description, category)
