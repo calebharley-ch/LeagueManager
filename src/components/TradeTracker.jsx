@@ -408,6 +408,9 @@ function TradeCard({
 export default function TradeTracker({ league, membership, members, teams, toast, onDataChanged }) {
   const players = usePlayers(league.id)
   const me = membership.profile_id
+  // Defined once here rather than inline at the call site — the ESPN worklist
+  // banner needs it in this scope too, and TradeCard takes it as a prop.
+  const isCommish = membership.role === 'commissioner'
   const [trades, setTrades] = useState([])
   const [votes, setVotes] = useState([])
   const [rosters, setRosters] = useState([])
@@ -869,7 +872,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
               key={t.id}
               trade={t}
               me={me}
-              isCommish={membership.role === 'commissioner'}
+              isCommish={isCommish}
               teams={teams}
               onAction={handleAction}
               busyId={busyId}
