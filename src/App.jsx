@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { supabase } from './supabaseClient'
 import { buildTeams } from './lib/teams'
-import { captureInviteFromUrl, getPendingInvite, clearPendingInvite } from './lib/invite'
+import { captureInviteFromUrl, clearPendingInvite } from './lib/invite'
 import Auth from './components/Auth'
 import SetPassword from './components/SetPassword'
 import LeagueGate from './components/LeagueGate'
