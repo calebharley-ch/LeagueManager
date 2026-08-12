@@ -15,7 +15,15 @@ import { Badge, Button, Card, Field, Input, Select, cx } from './ui'
  * cannot SELECT a league to find it by code; that function is the only door.
  */
 export default function LeagueGate({ memberships, onPick, onChanged, toast, email }) {
-  const [mode, setMode] = useState(memberships.length ? 'list' : 'create')
+  const hasLeagues = memberships.length > 0
+
+  // ⚠️ COLLAPSED WHEN YOU ALREADY BELONG SOMEWHERE. An invited manager arrives
+  // here already in their league — showing "join with a code" next to it made
+  // it look like there was still a step to complete, and people went hunting
+  // for a code that does not exist. Creating a second league is a rare thing
+  // and can afford two clicks.
+  const [adding, setAdding] = useState(!hasLeagues)
+  const [mode, setMode] = useState('create')
   const [busy, setBusy] = useState(false)
 
   const [name, setName] = useState('')
@@ -76,20 +84,30 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
         <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-500/30">
           <Trophy className="h-7 w-7 text-emerald-400" aria-hidden />
         </div>
-        <h1 className="text-2xl font-black tracking-tight text-slate-100">Your leagues</h1>
-        <p className="text-sm text-slate-500">Signed in as {email}</p>
+        <h1 className="text-2xl font-black tracking-tight text-slate-100">
+          {hasLeagues
+            ? memberships.length === 1 ? "You're in" : 'Your leagues'
+            : 'Get started'}
+        </h1>
+        <p className="text-sm text-slate-500">
+          {hasLeagues
+            ? memberships.length === 1
+              ? 'Nothing else to do — open your league below.'
+              : 'Pick one to open.'
+            : `Signed in as ${email}`}
+        </p>
       </div>
 
-      {memberships.length > 0 && (
+      {hasLeagues && (
         <Card className="mb-4 divide-y divide-slate-800">
           {memberships.map((m) => (
             <button
               key={m.league_id}
               onClick={() => onPick(m.league_id)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-800/50"
+              className="group flex w-full items-center gap-3 px-4 py-4 text-left transition-colors hover:bg-emerald-500/10"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-slate-100">{m.leagues.name}</p>
+                <p className="truncate text-base font-bold text-slate-100">{m.leagues.name}</p>
                 <p className="truncate text-xs text-slate-500">
                   {m.team_name} · {m.leagues.season}
                 </p>
@@ -99,12 +117,28 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
                   <ShieldCheck className="h-3 w-3" aria-hidden /> Commissioner
                 </Badge>
               )}
-              <ArrowRight className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+              <ArrowRight
+                className="h-5 w-5 shrink-0 text-slate-500 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-400"
+                aria-hidden
+              />
             </button>
           ))}
         </Card>
       )}
 
+      {/* Second step of the two-click path. Nothing below this exists until you
+          ask for it, so there is no invite code on screen to be confused by. */}
+      {hasLeagues && !adding && (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-800 px-3 py-2.5 text-xs font-semibold text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-300"
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden /> Create or join another league
+        </button>
+      )}
+
+      {adding && (
+      <>
       <div className="mb-4 flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
         {[['create', 'Create a league', Plus], ['join', 'Join with a code', LogIn]].map(
           ([key, label, Icon]) => (
@@ -193,6 +227,17 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
           </form>
         )}
       </Card>
+
+      {hasLeagues && (
+        <button
+          onClick={() => setAdding(false)}
+          className="mx-auto mt-3 text-xs text-slate-600 transition-colors hover:text-slate-400"
+        >
+          Never mind
+        </button>
+      )}
+      </>
+      )}
 
       <button
         onClick={() => supabase.auth.signOut()}
