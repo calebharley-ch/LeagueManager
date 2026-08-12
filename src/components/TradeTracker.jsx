@@ -213,9 +213,6 @@ function TradeCard({
   const approvals = votes.filter((v) => v.approve).length
   const vetoes = votes.length - approvals
   const myVote = votes.find((v) => v.voter_id === me)
-  // Both sides already agreed by proposing and accepting; letting them vote
-  // again would let a trade approve itself. Enforced in the RPC too.
-  const isParty = isProposer || isReceiver
 
   const proposer = findTeam(teams, { profileId: trade.proposer_id })
   const receiver = findTeam(teams, {
@@ -296,34 +293,29 @@ function TradeCard({
             approvals={approvals} vetoes={vetoes}
             needApprove={needApprove} needVeto={needVeto}
           />
+          {/* Everyone votes, including the two managers in the trade. */}
           <div className="flex flex-wrap items-center gap-2">
-            {isParty ? (
-              <span className="text-xs text-slate-500">
-                You're in this trade, so you don't vote on it.
-              </span>
-            ) : (
-              <>
-                <Button
-                  variant={myVote?.approve === true ? 'primary' : 'neutral'}
-                  busy={busy}
-                  onClick={() => onVote(trade, true)}
-                >
-                  <ThumbsUp className="h-3.5 w-3.5" /> Approve
-                </Button>
-                <Button
-                  variant={myVote?.approve === false ? 'danger' : 'neutral'}
-                  busy={busy}
-                  onClick={() => onVote(trade, false)}
-                >
-                  <ThumbsDown className="h-3.5 w-3.5" /> Veto
-                </Button>
-                <span className="text-xs text-slate-500">
-                  {myVote
-                    ? `You voted to ${myVote.approve ? 'approve' : 'veto'} — click the other to change it.`
-                    : 'You have not voted.'}
-                </span>
-              </>
-            )}
+            <Button
+              variant={myVote?.approve === true ? 'primary' : 'neutral'}
+              busy={busy}
+              onClick={() => onVote(trade, true)}
+            >
+              <ThumbsUp className="h-3.5 w-3.5" /> Approve
+            </Button>
+            <Button
+              variant={myVote?.approve === false ? 'danger' : 'neutral'}
+              busy={busy}
+              onClick={() => onVote(trade, false)}
+            >
+              <ThumbsDown className="h-3.5 w-3.5" /> Veto
+            </Button>
+            <span className="text-xs text-slate-500">
+              {myVote
+                ? `You voted to ${myVote.approve ? 'approve' : 'veto'} — click the other to change it.`
+                : isProposer || isReceiver
+                  ? "You're in this trade — you still get a vote."
+                  : 'You have not voted.'}
+            </span>
           </div>
         </div>
       )}
@@ -739,7 +731,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
   const myPendingCount = trades.filter((t) => {
     if (t.status === 'pending') return t.receiver_id === me
     if (t.status !== 'accepted') return false
-    if (t.proposer_id === me || t.receiver_id === me) return false
+    // Parties vote too, so no exclusion here.
     return !(votesByTrade[t.id] ?? []).some((v) => v.voter_id === me)
   }).length
 
