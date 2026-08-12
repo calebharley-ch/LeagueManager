@@ -3,6 +3,7 @@ import { Plus, ScrollText, Trash2, Pencil, BookOpen, Check } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { logAudit, AUDIT_ACTIONS } from '../lib/audit'
 import { RULE_CATEGORIES, RULE_STATUS_STYLES, SEASONS, timeAgo } from '../lib/constants'
+import Proposals from './Proposals'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
   Select, Textarea, cx,
@@ -83,6 +84,7 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
   const me = membership.profile_id
   const isCommish = membership.role === 'commissioner'
 
+  const [view, setView] = useState('rules')
   const [rules, setRules] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
@@ -227,13 +229,45 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
         </div>
         {/* Commissioner only, matching the RLS. Showing this to a manager would
             just produce a policy violation after they had typed the whole rule. */}
-        {isCommish && (
+        {isCommish && view === 'rules' && (
           <Button variant="primary" onClick={openNew}>
             <Plus className="h-4 w-4" /> Add rule
           </Button>
         )}
       </div>
 
+      {/* ⚠️ TWO DISTINCT THINGS, DELIBERATELY NOT ONE LIST. Left is what the
+          league has agreed; right is what someone wants to argue about. A
+          proposal sitting in the rulebook would read as law. */}
+      <div className="flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
+        {[
+          ['rules', 'The rulebook', rules.filter((r) => r.status === 'passed').length],
+          ['proposals', 'Ideas for next season', null],
+        ].map(([key, label, count]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={cx(
+              'flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors',
+              view === key ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            {label}
+            {count != null && <span className="ml-1 text-slate-500">({count})</span>}
+          </button>
+        ))}
+      </div>
+
+      {view === 'proposals' ? (
+        <Proposals
+          league={league}
+          membership={membership}
+          members={members}
+          toast={toast}
+          onDataChanged={async () => { await load(); onDataChanged?.() }}
+        />
+      ) : (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         <Select
           className="w-auto"
@@ -291,6 +325,9 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
             </section>
           ))}
         </div>
+      )}
+
+      </>
       )}
 
       <Modal
