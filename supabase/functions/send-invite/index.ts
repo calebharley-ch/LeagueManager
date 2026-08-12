@@ -122,15 +122,17 @@ Deno.serve(async (req) => {
       // credential in the link, so it has to be read (or minted) first. The
       // send timestamp is written afterwards, only on success.
       let token: string | null = null
+      let code: string | null = null
       {
         const { data: row } = await serviceClient
           .from('league_invites')
-          .select('token')
+          .select('token, code')
           .eq('league_id', leagueId).eq('espn_team_id', espnTeamId)
           .maybeSingle()
 
         if (row?.token) {
           token = row.token
+          code = row.code ?? null
           // Address may have been corrected since the last send.
           await serviceClient.from('league_invites')
             .update({ email, updated_at: new Date().toISOString() })
@@ -139,7 +141,7 @@ Deno.serve(async (req) => {
           const { data: made, error: mkErr } = await serviceClient
             .from('league_invites')
             .insert({ league_id: leagueId, espn_team_id: espnTeamId, email, invited_by: user.id })
-            .select('token').single()
+            .select('token, code').single()
           if (mkErr || !made) {
             results.push({
               espn_team_id: espnTeamId, ok: false,
@@ -148,6 +150,7 @@ Deno.serve(async (req) => {
             continue
           }
           token = made.token
+          code = made.code ?? null
         }
       }
 
@@ -174,11 +177,12 @@ Deno.serve(async (req) => {
     no code to type, no team to pick.
   </p>
   ${link}
-  ${joinUrl ? `<p style="font-size:12px;color:#94a3b8;word-break:break-all;margin:0 0 8px">Or paste this link: ${esc(joinUrl)}</p>` : `
-  <p style="margin:0 0 6px">Create an account and join with this code:</p>
-  <p style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:.15em;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:12px 16px;display:inline-block;margin:0 0 8px">
-    ${esc(league.invite_code)}
-  </p>`}
+  ${code ? `
+  <p style="margin:0 0 6px;font-size:14px;color:#475569">Or sign up and enter this code — it does the same thing:</p>
+  <p style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:24px;font-weight:700;letter-spacing:.2em;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:12px 18px;display:inline-block;margin:0 0 8px">
+    ${esc(code)}
+  </p>` : ''}
+  ${joinUrl ? `<p style="font-size:12px;color:#94a3b8;word-break:break-all;margin:8px 0 0">Link not working? Paste this: ${esc(joinUrl)}</p>` : ''}
   <p style="font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px;margin-top:20px">
     Not expecting this? You can ignore it — nothing happens until you sign up.
   </p>
@@ -191,7 +195,8 @@ Deno.serve(async (req) => {
         ``,
         joinUrl
           ? `Join here — you'll be added as ${teamName} automatically:\n${joinUrl}`
-          : `Create an account and join with this invite code: ${league.invite_code}`,
+          : '',
+        code ? `Or sign up and enter this code, which does the same thing: ${code}` : '',
         `\nNot expecting this? Ignore it — nothing happens until you sign up.`,
       ].filter(Boolean).join('\n')
 

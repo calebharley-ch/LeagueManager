@@ -64,12 +64,39 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
     }
   }
 
+  /**
+   * One field, two kinds of code.
+   *
+   * A PERSONAL code (from an invite) knows which team you are, so it joins and
+   * binds in one step and the team name box is ignored. A LEAGUE code is
+   * reusable and anonymous, so it needs you to name your team.
+   *
+   * Personal is tried first because it needs no extra input — asking people to
+   * know which sort of code they were handed is exactly the confusion this is
+   * meant to remove.
+   */
   async function joinLeague(e) {
     e.preventDefault()
-    if (!code.trim()) return toast.error('Enter the invite code.')
-    if (!joinTeamName.trim()) return toast.error('Give your team a name.')
+    if (!code.trim()) return toast.error('Enter your invite code.')
     setBusy(true)
     try {
+      const personal = await supabase.rpc('redeem_invite_by_code', { p_code: code.trim() })
+      if (!personal.error && personal.data) {
+        toast.success("You're in — your team was set up for you.")
+        await onChanged()
+        onPick(personal.data)
+        return
+      }
+
+      // Not a personal code (or it was already used). Fall back to the
+      // league-wide one, which does need a team name.
+      if (!joinTeamName.trim()) {
+        throw new Error(
+          personal.error?.message?.includes('not valid')
+            ? 'That code is not recognised. If you are using the league-wide code, add your team name too.'
+            : personal.error?.message ?? 'Enter your team name.'
+        )
+      }
       const { data, error } = await supabase.rpc('join_league', {
         p_code: code.trim(),
         p_team_name: joinTeamName.trim(),
@@ -166,22 +193,30 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
       <Card className="p-5">
         {mode === 'join' ? (
           <form onSubmit={joinLeague} className="space-y-3">
-            <Field label="Invite code" hint="Ask your commissioner for this.">
+            <Field
+              label="Invite code"
+              hint="The code your commissioner sent you."
+            >
               <Input
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                placeholder="ABCD2345"
+                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/\s/g, ''))}
+                placeholder="K7MQP2"
                 className="font-mono tracking-widest"
                 maxLength={8}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
                 required
               />
             </Field>
-            <Field label="Your team name">
+            <Field
+              label="Your team name"
+              hint="Only needed for a league-wide code. A personal invite code already knows your team."
+            >
               <Input
                 value={joinTeamName}
                 onChange={(e) => setJoinTeamName(e.target.value)}
                 placeholder="Gridiron Goblins"
-                required
               />
             </Field>
             <Button type="submit" variant="primary" busy={busy} className="w-full py-2">

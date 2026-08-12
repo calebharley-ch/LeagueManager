@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Save, ShieldCheck, User, Users, LogOut, Trophy, UserCheck, UserPlus, Link2, Mail,
-  MailCheck, Send, Trash2, UserMinus, ShieldPlus, ShieldOff,
+  MailCheck, Send, Trash2, UserMinus, ShieldPlus, ShieldOff, Copy, Check,
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { timeAgo } from '../lib/constants'
@@ -27,6 +27,20 @@ export default function Profile({
   const [emails, setEmails] = useState({})
   const [sendingId, setSendingId] = useState(null)
   const [sendingAll, setSendingAll] = useState(false)
+  const [copiedCode, setCopiedCode] = useState(null)
+
+  async function copyCode(value, teamName) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedCode(value)
+      setTimeout(() => setCopiedCode(null), 1800)
+      toast.success(`${teamName}'s code copied.`)
+    } catch {
+      // Clipboard needs a secure context and permission; on a phone that is
+      // not always granted. Say what it is so it can be typed.
+      toast.error(`Copy failed — the code is ${value}`)
+    }
+  }
 
   const isCommish = membership.role === 'commissioner'
   const dirty =
@@ -394,6 +408,23 @@ export default function Profile({
                     )}
                   </div>
                 </div>
+
+                {/* The code does the same job as the emailed link: joins the
+                    league AND binds this team. Here so it can be texted to
+                    someone who never opens their email. */}
+                {canInvite && inv?.code && (
+                  <button
+                    type="button"
+                    onClick={() => copyCode(inv.code, t.team_name)}
+                    className="mt-2 flex items-center gap-1.5 rounded-md bg-slate-950/60 px-2 py-1 font-mono text-xs tracking-widest text-slate-300 ring-1 ring-slate-800 transition-colors hover:text-emerald-300 hover:ring-slate-700"
+                    title={`Copy ${t.team_name}'s personal invite code`}
+                  >
+                    {inv.code}
+                    {copiedCode === inv.code
+                      ? <Check className="h-3 w-3 text-emerald-400" aria-hidden />
+                      : <Copy className="h-3 w-3 opacity-60" aria-hidden />}
+                  </button>
+                )}
 
                 {canInvite && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
