@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Trophy, ArrowLeftRight, ScrollText, History, UserCircle, LogOut, Users,
   ShieldCheck, CheckCircle2, AlertCircle, X, Settings, ChevronDown,
@@ -8,6 +8,15 @@ import { buildTeams } from './lib/teams'
 import { captureInviteFromUrl, clearPendingInvite } from './lib/invite'
 import Auth from './components/Auth'
 import SetPassword from './components/SetPassword'
+
+// ⚠️ LAZY ON PURPOSE. History is the only thing that uses Chart.js, and
+// bundling it statically took the main chunk from 486 KB to 709 KB — everyone
+// paying for charts on the sign-in screen. Split out, it loads on the one tab
+// that needs it.
+//
+// Aliased because `History` is already taken in this file by the lucide icon
+// used for the Audit Log tab.
+const LeagueHistory = lazy(() => import('./components/History'))
 import LeagueGate from './components/LeagueGate'
 import LeagueSettings from './components/LeagueSettings'
 import TradeTracker from './components/TradeTracker'
@@ -22,7 +31,8 @@ const ACTIVE_LEAGUE_KEY = 'lm_active_league'
 const TABS = [
   { key: 'trades',   label: 'Trades',    icon: ArrowLeftRight },
   { key: 'rules',    label: 'Rules',     icon: ScrollText },
-  { key: 'rosters',  label: 'Rosters',   icon: Users },
+  { key: 'rosters',  label: 'Teams',     icon: Users },
+  { key: 'history',  label: 'History',   icon: Trophy },
   { key: 'audit',    label: 'Audit Log', icon: History },
   { key: 'settings', label: 'Settings',  icon: Settings },
   { key: 'profile',  label: 'Profile',   icon: UserCircle },
@@ -477,6 +487,11 @@ export default function App() {
         )}
         {tab === 'rosters' && (
           <Rosters league={league} teams={teams} toast={toast} refreshKey={refreshKey} />
+        )}
+        {tab === 'history' && (
+          <Suspense fallback={<Loading label="Loading league history…" />}>
+            <LeagueHistory league={league} toast={toast} />
+          </Suspense>
         )}
         {tab === 'audit' && (
           <AuditLog league={league} members={members} toast={toast} refreshKey={refreshKey} />
