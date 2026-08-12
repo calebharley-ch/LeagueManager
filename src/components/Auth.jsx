@@ -36,7 +36,7 @@ const OAUTH_PROVIDERS = [
  * from here — with email confirmation on there is no session yet at signUp, so
  * the insert would fail RLS and leave an auth user with no profile.
  */
-export default function Auth({ onError, invite }) {
+export default function Auth({ onError, invite, inviteToken }) {
   // Only offer providers the project actually has on. A disabled one redirects
   // the browser to a JSON error page that no catch block here can intercept.
   const { providers: enabled, loading: providersLoading } = useEnabledProviders()
@@ -86,13 +86,32 @@ export default function Auth({ onError, invite }) {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { display_name: displayName.trim() || null } },
+          options: {
+            data: { display_name: displayName.trim() || null },
+            // ⚠️ CARRY THE INVITE THROUGH THE CONFIRMATION EMAIL.
+            // The token normally rides in localStorage, which breaks if they
+            // click the invite on a laptop and open the confirmation email on
+            // a phone — different storage, so they would land signed in with no
+            // league. Putting it in the return URL makes the flow survive that.
+            //
+            // Requires `.../LeagueManager/**` in Supabase's Redirect URLs; a
+            // bare URL entry will not match one carrying a query string, and
+            // Supabase silently falls back to the Site URL. That fallback is
+            // harmless — the localStorage path still works same-browser.
+            emailRedirectTo: inviteToken
+              ? `${authRedirectTo()}?invite=${encodeURIComponent(inviteToken)}`
+              : authRedirectTo(),
+          },
         })
         if (error) throw error
         // With email confirmation enabled Supabase returns a user but no
         // session. Say so, instead of leaving a blank screen.
         if (!data.session) {
-          setNotice('Check your email to confirm your account, then sign in.')
+          setNotice(
+            invite
+              ? `Check your email to confirm your account. The link brings you back here and joins you as ${invite.team_name}.`
+              : 'Check your email to confirm your account, then sign in.'
+          )
           setMode('signin')
         }
       } else {

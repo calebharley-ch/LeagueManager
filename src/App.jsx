@@ -302,7 +302,7 @@ export default function App() {
   if (!session) {
     return (
       <>
-        <Auth onError={toast.error} invite={invitePreview} />
+        <Auth onError={toast.error} invite={invitePreview} inviteToken={inviteToken} />
         <ToastStack items={items} dismiss={dismiss} />
       </>
     )
