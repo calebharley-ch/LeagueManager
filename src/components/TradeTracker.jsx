@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeftRight, Plus, Trash2, Check, X, Gavel, ShieldAlert,
-  Handshake, MessageSquare, ThumbsUp, ThumbsDown,
+  Handshake, MessageSquare, ThumbsUp, ThumbsDown, CheckCircle2, AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { usePlayers } from '../lib/usePlayers'
-import { findTeam, ownPicksTradedAway } from '../lib/teams'
+import {
+  findTeam, ownPicksTradedAway, tradesAwaitingEspn, describeEspnWork,
+} from '../lib/teams'
 import PlayerPicker from './PlayerPicker'
 import { logAudit, AUDIT_ACTIONS } from '../lib/audit'
 import {
@@ -201,7 +203,7 @@ function VoteProgress({ approvals, vetoes, needApprove, needVeto }) {
 
 function TradeCard({
   trade, me, isCommish, teams, onAction, busyId, votes = [],
-  needApprove, needVeto, onVote,
+  needApprove, needVeto, onVote, onSettle,
 }) {
   const status = TRADE_STATUS_STYLES[trade.status] ?? TRADE_STATUS_STYLES.pending
   const isReceiver = trade.receiver_id === me
@@ -319,6 +321,35 @@ function TradeCard({
                 : 'You have not voted.'}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Applying a completed trade inside ESPN. Nothing moves automatically,
+          and a FAAB trade that has not been applied there is not binding —
+          ESPN will still honour a bid with money the manager traded away. */}
+      {trade.status === 'completed' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-950/40 px-4 py-2.5">
+          {trade.espn_settled_at ? (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+              Applied in ESPN {timeAgo(trade.espn_settled_at)}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+              Not applied in ESPN yet — move the {describeEspnWork(trade)} there.
+            </span>
+          )}
+          {isCommish && (
+            <Button
+              variant={trade.espn_settled_at ? 'ghost' : 'neutral'}
+              busy={busy}
+              className="text-xs"
+              onClick={() => onSettle(trade, !trade.espn_settled_at)}
+            >
+              {trade.espn_settled_at ? 'Mark not applied' : 'Mark applied in ESPN'}
+            </Button>
+          )}
         </div>
       )}
 
@@ -660,6 +691,34 @@ export default function TradeTracker({ league, membership, members, teams, toast
     }
   }
 
+  /**
+   * Record that a completed trade has (or has not) been applied inside ESPN.
+   *
+   * ⚠️ This is not cosmetic. Marking it applied stops the app adding its FAAB
+   * delta on top of ESPN's spend figure — do it BEFORE making the adjustment in
+   * ESPN and the balances will read low until the next sync catches up.
+   */
+  async function handleSettle(trade, settled) {
+    setBusyId(trade.id)
+    try {
+      const { error } = await supabase
+        .from('trades')
+        .update({
+          espn_settled_at: settled ? new Date().toISOString() : null,
+          espn_settled_by: settled ? me : null,
+        })
+        .eq('id', trade.id)
+      if (error) throw error
+      toast.success(settled ? 'Marked as applied in ESPN.' : 'Marked as not applied.')
+      await load()
+      onDataChanged?.()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function handleAction(trade, action) {
     const CONFIRM = {
       veto: 'Veto this trade? Both managers will see it as vetoed.',
@@ -728,6 +787,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
     (t) => t.status !== 'pending' && t.status !== 'accepted'
   )
   const shown = tab === 'pending' ? openTrades : settledTrades
+  const awaitingEspn = useMemo(() => tradesAwaitingEspn(trades), [trades])
 
   // Waiting on YOU: a trade you must answer, or a vote you have not cast.
   const myPendingCount = trades.filter((t) => {
@@ -752,6 +812,24 @@ export default function TradeTracker({ league, membership, members, teams, toast
           <Plus className="h-4 w-4" /> Propose trade
         </Button>
       </div>
+
+      {/* The worklist. The arithmetic was never the hard part — remembering
+          which completed trades still need doing in ESPN is. */}
+      {isCommish && awaitingEspn.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setTab('settled')}
+          className="flex w-full items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2.5 text-left text-xs text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/15"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+          <span>
+            <strong>{awaitingEspn.length} completed trade{awaitingEspn.length === 1 ? '' : 's'}</strong>{' '}
+            not applied in ESPN yet. Nothing moves automatically — until you make the
+            change there, a traded player is still on the old roster and traded FAAB can
+            still be spent.
+          </span>
+        </button>
+      )}
 
       <div className="flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
         {[
@@ -799,6 +877,7 @@ export default function TradeTracker({ league, membership, members, teams, toast
               needApprove={league.trade_votes_to_approve ?? 5}
               needVeto={league.trade_votes_to_veto ?? 9}
               onVote={handleVote}
+              onSettle={handleSettle}
             />
           ))}
         </div>

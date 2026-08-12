@@ -87,9 +87,12 @@ const partiesOf = (trade, teams) => ({
  * trades this app has COMPLETED. Pending and accepted trades are deliberately
  * excluded: money that might still be vetoed has not moved.
  *
- * ⚠️ Double-count risk. If your league also processes the trade inside ESPN,
- * ESPN's acquisitionBudgetSpent will eventually reflect it too. This is why
- * only completed trades count, and why the UI labels the number as derived.
+ * ⚠️ A TRADE MARKED APPLIED IN ESPN CONTRIBUTES NOTHING HERE. Once the
+ * commissioner has adjusted the budgets in ESPN, ESPN's own
+ * acquisitionBudgetSpent already includes that transfer — adding our delta on
+ * top would count the same money twice, and the error would compound on every
+ * sync. `espn_settled_at` is the handoff: before it we track the pending
+ * adjustment, after it ESPN is the source of truth.
  */
 export function deriveFaab({ teams, trades = [], budget = 100 }) {
   const out = {}
@@ -105,6 +108,8 @@ export function deriveFaab({ teams, trades = [], budget = 100 }) {
 
   for (const trade of trades) {
     if (trade.status !== 'completed') continue
+    // Already reflected in ESPN's own numbers — see the note above.
+    if (trade.espn_settled_at) continue
     const { from, to } = partiesOf(trade, teams)
     if (!from || !to) continue
     for (const item of trade.trade_items ?? []) {
@@ -219,6 +224,29 @@ export function ownPicksTradedAway({ teams, trades = [], teamKey, excludeTradeId
     }
   }
   return n
+}
+
+/**
+ * Completed trades the commissioner still has to apply inside ESPN.
+ *
+ * This app records what the league agreed; ESPN is where it takes effect.
+ * Nothing here happens automatically — players, FAAB and picks all have to be
+ * moved by hand — so this is the list of work outstanding.
+ */
+export function tradesAwaitingEspn(trades = []) {
+  return trades.filter((t) => t.status === 'completed' && !t.espn_settled_at)
+}
+
+/** "players and FAAB" — what a commissioner actually has to go and do. */
+export function describeEspnWork(trade) {
+  const kinds = new Set((trade.trade_items ?? []).map((i) => i.item_type))
+  const parts = []
+  if (kinds.has('player')) parts.push('players')
+  if (kinds.has('faab')) parts.push('FAAB')
+  if (kinds.has('pick')) parts.push('picks')
+  if (parts.length === 0) return 'nothing'
+  if (parts.length === 1) return parts[0]
+  return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
 }
 
 /** "1st, 2nd, 3rd (from Bandits), 5th" for one year. */
