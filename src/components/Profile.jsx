@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Save, ShieldCheck, User, Users, LogOut, Trophy, UserCheck, UserPlus, Link2, Mail,
-  MailCheck, Send,
+  MailCheck, Send, Trash2, UserMinus,
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { timeAgo } from '../lib/constants'
-import { Badge, Button, Card, Field, Input, Select } from './ui'
+import { Badge, Button, Card, Field, IconButton, Input, Select } from './ui'
 
 // Loose on purpose — the real check is the send failing. This only stops us
 // spending an API call on an obvious typo, and gates the Send button.
@@ -104,6 +104,52 @@ export default function Profile({
     } finally {
       setSendingId(null)
       setSendingAll(false)
+    }
+  }
+
+  /** Forget the address for a team nobody has registered for. */
+  async function clearInvite(t) {
+    if (!window.confirm(
+      `Remove ${invites[t.espn_team_id]?.email ?? 'the saved address'} from ${t.team_name}?\n\n` +
+      `The invite link already sent stops being tracked, but it keeps working — ` +
+      `delete and re-invite only if the address was wrong.`
+    )) return
+    setSendingId(t.espn_team_id)
+    try {
+      const { error } = await supabase
+        .from('league_invites').delete()
+        .eq('league_id', league.id).eq('espn_team_id', t.espn_team_id)
+      if (error) throw error
+      setEmails((m) => ({ ...m, [t.espn_team_id]: '' }))
+      toast.success('Invite cleared.')
+      await loadInvites()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSendingId(null)
+    }
+  }
+
+  /** Detach a registered manager from the league. */
+  async function removeMember(t) {
+    if (!window.confirm(
+      `Remove ${t.team_name} from ${league.name}?\n\n` +
+      `They lose access immediately and the team goes back to unclaimed, so ` +
+      `someone else can be invited to it. Their past trades stay in the feed but ` +
+      `will show as an unknown team.\n\nTheir account is not deleted.`
+    )) return
+    setSendingId(t.espn_team_id ?? t.key)
+    try {
+      // RLS allows this for the commissioner only, and never on your own row.
+      const { error } = await supabase
+        .from('league_members').delete().eq('id', t.member.id)
+      if (error) throw error
+      toast.success(`${t.team_name} removed.`)
+      await onChanged?.()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSendingId(null)
     }
   }
 
@@ -272,9 +318,23 @@ export default function Profile({
                       </Badge>
                     )}
                     {t.claimed ? (
-                      <Badge className="bg-emerald-500/15 text-emerald-300 ring-emerald-500/30">
-                        <UserCheck className="h-3 w-3" aria-hidden /> Registered
-                      </Badge>
+                      <>
+                        <Badge className="bg-emerald-500/15 text-emerald-300 ring-emerald-500/30">
+                          <UserCheck className="h-3 w-3" aria-hidden /> Registered
+                        </Badge>
+                        {/* Never on your own row: RLS forbids it, and a
+                            commissioner removing themselves would strand the
+                            league with nobody who can administer it. */}
+                        {isCommish && t.profile_id !== membership.profile_id && t.member && (
+                          <IconButton
+                            label={`Remove ${t.team_name} from the league`}
+                            disabled={sendingId === (t.espn_team_id ?? t.key)}
+                            onClick={() => removeMember(t)}
+                          >
+                            <UserMinus className="h-4 w-4" />
+                          </IconButton>
+                        )}
+                      </>
                     ) : inv?.invited_at ? (
                       <Badge className="bg-sky-500/15 text-sky-300 ring-sky-500/30">
                         <MailCheck className="h-3 w-3" aria-hidden /> Invited
@@ -312,6 +372,15 @@ export default function Profile({
                       <Send className="h-3 w-3" />
                       {inv?.invited_at ? 'Resend' : 'Send invite'}
                     </Button>
+                    {inv && (
+                      <IconButton
+                        label={`Clear invite for ${t.team_name}`}
+                        disabled={sendingAll || sendingId === t.espn_team_id}
+                        onClick={() => clearInvite(t)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </IconButton>
+                    )}
                   </div>
                 )}
               </div>
