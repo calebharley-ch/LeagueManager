@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Trophy, Crown, TrendingUp, Swords, Table2, ChevronDown, History as HistoryIcon } from 'lucide-react'
+import {
+  Trophy, Crown, TrendingUp, Swords, Table2, ChevronDown, Medal, Users, User,
+  CalendarDays, Zap, History as HistoryIcon,
+} from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { ACCENT, ACCENT_SOFT } from '../lib/chartTheme'
 import ChartCanvas from './ChartCanvas'
-import { Badge, Card, EmptyState, Loading, cx } from './ui'
+import { Badge, Card, EmptyState, Loading, Segmented, cx } from './ui'
 
 /**
  * The league's record: who has won it, who scores, who owns whom.
@@ -12,12 +15,13 @@ import { Badge, Card, EmptyState, Loading, cx } from './ui'
  * `league_history` row set keyed by `kind`, fetched once and rendered from
  * memory, because it changes about once a season.
  *
- * Headline numbers are always visible; the three big tables are behind
- * disclosures, since they are reference material rather than something you
- * scan every visit.
+ * Headline numbers are always visible; the big tables are behind disclosures,
+ * since they are reference material rather than something you scan every visit.
+ *
+ * Kinds, all optional - a league missing one just loses that section:
+ *   dynasty · champions · standings · pf_by_year · h2h · core · palette
+ *   records  (migration 016 - the record book)
  */
-
-const KINDS = ['dynasty', 'champions', 'standings', 'pf_by_year', 'h2h', 'core', 'palette']
 
 /** Collapsible section. Closed by default — this is drill-down, not headline. */
 function Drawer({ icon: Icon, title, subtitle, children }) {
@@ -47,6 +51,113 @@ function Drawer({ icon: Icon, title, subtitle, children }) {
 const num = (v, d = 0) =>
   typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: d }) : v
 
+/* ── Record book ───────────────────────────────────────────────────────────── */
+
+/**
+ * Cell tones, carried through from the source page. A leaderboard where every
+ * number looks the same is unreadable — 30.9 points is a catastrophe and 202.7
+ * is a franchise record, and the colour is what says which.
+ */
+const TONE = {
+  rank: 'w-8 text-right text-slate-600',
+  good: 'text-emerald-400 font-semibold',
+  bad: 'text-rose-400 font-semibold',
+  accent: 'text-amber-400 font-semibold',
+  info: 'text-sky-400 font-semibold',
+}
+
+/** One leaderboard. `cols` is the header row, `rows` are cells: a bare string,
+ *  or {v, t: tone, h: hover hint}. */
+function RecordTable({ table }) {
+  return (
+    <Card className={cx('overflow-hidden p-4', table.wide && 'sm:col-span-2')}>
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-300">{table.title}</p>
+      {table.note && <p className="mt-1 text-[11px] leading-snug text-slate-500">{table.note}</p>}
+      <div className="-mx-4 mt-3 overflow-x-auto">
+        <table className="w-full min-w-max text-xs">
+          <thead>
+            <tr className="border-b border-slate-800 text-left text-[10px] uppercase tracking-wide text-slate-500">
+              {table.cols.map((c, i) => (
+                <th key={i} className="whitespace-nowrap px-2 py-1.5 font-semibold first:pl-4 last:pr-4">
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/60">
+            {table.rows.map((row, i) => (
+              <tr key={i}>
+                {row.map((cell, j) => {
+                  const { v, t, h } = typeof cell === 'string' ? { v: cell } : cell
+                  return (
+                    <td
+                      key={j}
+                      title={h || undefined}
+                      className={cx(
+                        'whitespace-nowrap px-2 py-1.5 tabular-nums first:pl-4 last:pr-4',
+                        TONE[t] ?? 'text-slate-300',
+                        h && 'cursor-help'
+                      )}
+                    >
+                      {v}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Two axes, four panes: team or player, season or game.
+ *
+ * Split this way because the questions are different — "who has had the best
+ * season" and "what is the single best game anyone has ever had" want different
+ * tables, and putting all 21 on one screen means nobody reads any of them.
+ */
+function RecordBook({ records }) {
+  const [subject, setSubject] = useState('team')
+  const [span, setSpan] = useState('season')
+  const tables = records[subject]?.[span] ?? []
+
+  return (
+    <div className="space-y-3 px-4 py-4">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Segmented
+          value={subject}
+          onChange={setSubject}
+          options={[
+            { value: 'team', label: 'Team', icon: Users },
+            { value: 'player', label: 'Player', icon: User },
+          ]}
+        />
+        <Segmented
+          value={span}
+          onChange={setSpan}
+          options={[
+            { value: 'season', label: 'Season', icon: CalendarDays },
+            { value: 'game', label: 'Game', icon: Zap },
+          ]}
+        />
+      </div>
+
+      {tables.length === 0 ? (
+        <p className="py-6 text-center text-sm text-slate-500">
+          Nothing recorded for {subject} {span} records.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {tables.map((t) => <RecordTable key={t.id} table={t} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function History({ league, toast }) {
   const [rows, setRows] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -71,6 +182,7 @@ export default function History({ league, toast }) {
   const h2h = d.h2h ?? {}
   const core = d.core ?? []
   const palette = d.palette ?? [ACCENT]
+  const records = d.records ?? null
 
   const colourFor = useCallback(
     (name) => palette[Math.max(0, core.indexOf(name)) % palette.length] ?? ACCENT,
@@ -159,6 +271,24 @@ export default function History({ league, toast }) {
     [champions]
   )
 
+  /* The one record worth putting on the front page. Read by column NAME rather
+   * than position — the record book is hand-maintained, and a column inserted
+   * next January should blank this card, not mislabel it. */
+  const bestGame = useMemo(() => {
+    const t = d.records?.team?.game?.find((x) => x.id === 'highest-single-game-scores-rs')
+    if (!t?.rows?.length) return null
+    const at = (row, col) => {
+      const i = t.cols.indexOf(col)
+      if (i < 0) return null
+      const cell = row[i]
+      return typeof cell === 'string' ? cell : cell?.v ?? null
+    }
+    const top = t.rows[0]
+    const who = at(top, 'Manager')
+    const score = at(top, 'Score')
+    return who && score ? { who, score, when: at(top, 'Year Wk') } : null
+  }, [d.records])
+
   if (loading) return <Loading label="Loading league history…" />
 
   if (!dynasty.length && !champions.length) {
@@ -173,6 +303,9 @@ export default function History({ league, toast }) {
   }
 
   const h2hNames = Object.keys(h2h)
+  const recordCount = records
+    ? Object.values(records).flatMap((bySpan) => Object.values(bySpan)).flat().length
+    : 0
 
   return (
     <div className="space-y-4">
@@ -184,7 +317,7 @@ export default function History({ league, toast }) {
       </div>
 
       {/* Headline numbers */}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {titleHolder && (
           <Card className="flex items-center gap-3 p-4">
             <div className="rounded-xl bg-amber-500/10 p-2.5 ring-1 ring-amber-500/30">
@@ -214,6 +347,22 @@ export default function History({ league, toast }) {
               <p className="truncate text-xs text-slate-500">
                 {warLeader.war > 0 ? '+' : ''}{num(warLeader.war, 2)} · {warLeader.w}-{warLeader.l}
                 {warLeader.t ? `-${warLeader.t}` : ''}
+              </p>
+            </div>
+          </Card>
+        )}
+        {bestGame && (
+          <Card className="flex items-center gap-3 p-4">
+            <div className="rounded-xl bg-sky-500/10 p-2.5 ring-1 ring-sky-500/30">
+              <Zap className="h-5 w-5 text-sky-400" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Highest single game
+              </p>
+              <p className="truncate text-base font-bold text-slate-100">{bestGame.score}</p>
+              <p className="truncate text-xs text-slate-500">
+                {bestGame.who}{bestGame.when ? ` · ${bestGame.when}` : ''}
               </p>
             </div>
           </Card>
@@ -290,6 +439,16 @@ export default function History({ league, toast }) {
           </table>
         </div>
       </Drawer>
+
+      {recordCount > 0 && (
+        <Drawer
+          icon={Medal}
+          title="Record book"
+          subtitle={`${recordCount} leaderboards · team and player, season and game`}
+        >
+          <RecordBook records={records} />
+        </Drawer>
+      )}
 
       <Drawer icon={Crown} title="Champions" subtitle={`Every season back to ${champions.at(-1)?.year ?? ''}`}>
         <ul className="divide-y divide-slate-800/60">
