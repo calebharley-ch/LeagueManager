@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Trophy, Plus, LogIn, LogOut, ArrowRight, ShieldCheck, Users } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { SEASONS } from '../lib/constants'
-import { Badge, Button, Card, Field, Input, Select, cx } from './ui'
+import { Badge, Button, Card, Field, Input, Segmented, Select, cx } from './ui'
 
 /**
  * Shown after sign-in until a league is active.
@@ -173,22 +173,15 @@ export default function LeagueGate({ memberships, onPick, onChanged, toast, emai
 
       {adding && (
       <>
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
-        {[['create', 'Create a league', Plus], ['join', 'Join with a code', LogIn]].map(
-          ([key, label, Icon]) => (
-            <button
-              key={key}
-              onClick={() => setMode(key)}
-              className={cx(
-                'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors',
-                mode === key ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
-            </button>
-          )
-        )}
-      </div>
+      <Segmented
+        className="mb-4"
+        value={mode}
+        onChange={setMode}
+        options={[
+          { value: 'create', label: 'Create a league', icon: Plus },
+          { value: 'join', label: 'Join with a code', icon: LogIn },
+        ]}
+      />
 
       <Card className="p-5">
         {mode === 'join' ? (

@@ -17,7 +17,7 @@ import {
 } from '../lib/constants'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
-  Select, Textarea, cx,
+  Segmented, Select, Textarea, cx,
 } from './ui'
 
 let assetKeySeq = 0
@@ -868,23 +868,14 @@ export default function TradeTracker({ league, membership, members, teams, toast
         </button>
       )}
 
-      <div className="flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
-        {[
-          ['pending', 'Open', openTrades.length],
-          ['settled', 'Settled', settledTrades.length],
-        ].map(([key, label, count]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={cx(
-              'flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors',
-              tab === key ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'
-            )}
-          >
-            {label} <span className="text-slate-500">({count})</span>
-          </button>
-        ))}
-      </div>
+      <Segmented
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'pending', label: 'Open', count: openTrades.length },
+          { value: 'settled', label: 'Settled', count: settledTrades.length },
+        ]}
+      />
 
       {loading ? (
         <Loading label="Loading trades…" />

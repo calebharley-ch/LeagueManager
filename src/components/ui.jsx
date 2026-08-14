@@ -128,6 +128,48 @@ export function Select({ className, children, ...rest }) {
   )
 }
 
+/**
+ * Segmented control — the pill-shaped row of exclusive choices used for tabs
+ * within a screen.
+ *
+ * Extracted because this markup was hand-rolled in four files (trades, rules,
+ * the league gate and sign-in), which meant any restyle was a four-place edit
+ * and none of them carried the tablist semantics a screen reader needs.
+ *
+ * options: [{ value, label, count?, icon? }]
+ */
+export function Segmented({ value, onChange, options, className }) {
+  return (
+    <div
+      role="tablist"
+      className={cx('flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800', className)}
+    >
+      {options.map((o) => {
+        const active = value === o.value
+        const Icon = o.icon
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(o.value)}
+            className={cx(
+              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5',
+              'text-sm font-semibold transition-colors',
+              active ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            {Icon && <Icon className="h-3.5 w-3.5" aria-hidden />}
+            {o.label}
+            {o.count != null && <span className="text-slate-500">({o.count})</span>}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /* ── Feedback ─────────────────────────────────────────────────────────────── */
 
 export function Spinner({ className }) {

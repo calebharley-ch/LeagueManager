@@ -29,11 +29,22 @@ npm install
 cp .env.example .env          # fill in from Supabase → Project Settings → API
 ```
 
-Run `schema.sql` in the Supabase SQL editor. If your database predates a
-migration in `migrations/`, run those too, in order — `create table if not
-exists` does nothing to a table that already has rows, so `schema.sql` alone
-will not add new columns to a live database. Each migration is additive and safe
-to run twice.
+In the Supabase SQL editor, run **both**, in this order:
+
+1. `schema.sql` — the core tables, RLS and RPCs
+2. `migrations/RUN_ALL.sql` — every migration since, concatenated
+
+⚠️ **Step 2 is required, not optional, even on a brand new project.** `schema.sql`
+is the original schema and has not absorbed every later migration — trade
+voting, invite codes, league history and rule proposals live only in
+`migrations/`. Skipping it produces an app that loads and then fails on those
+tabs with `relation does not exist`, surfaced only as a toast.
+
+`RUN_ALL.sql` is generated from the numbered files by concatenation. Every
+statement in it is `if not exists`, `create or replace`, or an insert guarded by
+`where not exists`, so running the whole file is always safe — already-applied
+migrations do nothing. There is no migration-tracking table; that idempotency is
+the entire safety net, which is why it is never broken.
 
 Then:
 

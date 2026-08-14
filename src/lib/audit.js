@@ -15,6 +15,14 @@ export const AUDIT_ACTIONS = {
   RULE_ADDED:      'rule.added',
   RULE_UPDATED:    'rule.updated',
   RULE_DELETED:    'rule.deleted',
+  // ⚠️ PROPOSALS ARE NOT RULES. Logging a deleted proposal as 'rule.deleted'
+  // made the feed say "Bob deleted a rule" — with a Commissioner badge, because
+  // that action is in COMMISH_ACTIONS — when no rule was touched and Bob is a
+  // manager. That inverts the one invariant the proposals feature rests on.
+  PROPOSAL_ADDED:    'proposal.added',
+  PROPOSAL_ADOPTED:  'proposal.adopted',
+  PROPOSAL_DECLINED: 'proposal.declined',
+  PROPOSAL_DELETED:  'proposal.deleted',
   // Kept so older audit_log rows still render with a label instead of a raw
   // action string. Nothing writes these any more — the rulebook stores rules,
   // it does not run votes.

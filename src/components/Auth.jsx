@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Trophy, Mail, Lock, User } from 'lucide-react'
 import { supabase, authRedirectTo } from '../supabaseClient'
 import { useEnabledProviders } from '../lib/authProviders'
-import { Button, Card, Field, Input } from './ui'
+import { Button, Card, Field, Input, Segmented } from './ui'
 
 // Providers to offer. Comment one out and its button disappears — but the
 // provider ALSO has to be enabled in Supabase → Authentication → Providers, or
@@ -174,21 +174,15 @@ export default function Auth({ onError, invite, inviteToken }) {
         )}
 
         <Card className="p-5">
-          <div className="mb-4 flex rounded-lg bg-slate-950/60 p-1 ring-1 ring-slate-800">
-            {[['signin', 'Sign in'], ['signup', 'Register']].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => { setMode(key); setNotice('') }}
-                className={
-                  'flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ' +
-                  (mode === key ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200')
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            className="mb-4"
+            value={mode}
+            onChange={(next) => { setMode(next); setNotice('') }}
+            options={[
+              { value: 'signin', label: 'Sign in' },
+              { value: 'signup', label: 'Register' },
+            ]}
+          />
 
           {notice && (
             <p className="mb-4 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300 ring-1 ring-emerald-500/30">

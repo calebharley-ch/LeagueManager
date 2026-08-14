@@ -60,6 +60,26 @@ export const TRADE_STATUS_STYLES = {
 // The database enum still reads proposed/passed/rejected because renaming a
 // Postgres enum in place is not worth a migration — these are the labels the
 // league actually uses for those three states.
+// Category colours. Defined once for the same reason ASSET_STYLES is: the
+// rulebook and the proposals board both render these, and two copies means
+// recolouring one board and silently leaving the other with an unstyled badge.
+export const CATEGORY_CHIP = {
+  Scoring:    'bg-indigo-500/15 text-indigo-300 ring-indigo-500/30',
+  Roster:     'bg-purple-500/15 text-purple-300 ring-purple-500/30',
+  Draft:      'bg-sky-500/15 text-sky-300 ring-sky-500/30',
+  Financial:  'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
+  Governance: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
+}
+
+// A proposal is NOT a rule, so it gets its own vocabulary rather than reusing
+// RULE_STATUS_STYLES. "Adopted" here means it became a rule; the rule itself is
+// then what carries the status.
+export const PROPOSAL_STATUS_STYLES = {
+  open:     { label: 'Up for discussion', chip: 'bg-sky-500/15 text-sky-300 ring-sky-500/30' },
+  adopted:  { label: 'Adopted',           chip: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
+  declined: { label: 'Not adopted',       chip: 'bg-slate-500/15 text-slate-400 ring-slate-500/30' },
+}
+
 export const RULE_STATUS_STYLES = {
   passed:   { label: 'Adopted',  chip: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
   proposed: { label: 'Draft',    chip: 'bg-amber-500/15 text-amber-300 ring-amber-500/30' },

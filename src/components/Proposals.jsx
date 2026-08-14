@@ -1,26 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, Lightbulb, Trash2, Check, X, ShieldAlert } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { logAudit, AUDIT_ACTIONS } from '../lib/audit'
-import { RULE_CATEGORIES, SEASONS, timeAgo } from '../lib/constants'
+import {
+  CATEGORY_CHIP, PROPOSAL_STATUS_STYLES as STATUS, RULE_CATEGORIES, SEASONS, timeAgo,
+} from '../lib/constants'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
   Select, Textarea, cx,
 } from './ui'
-
-const CATEGORY_CHIP = {
-  Scoring:    'bg-indigo-500/15 text-indigo-300 ring-indigo-500/30',
-  Roster:     'bg-purple-500/15 text-purple-300 ring-purple-500/30',
-  Draft:      'bg-sky-500/15 text-sky-300 ring-sky-500/30',
-  Financial:  'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
-  Governance: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
-}
-
-const STATUS = {
-  open:     { label: 'Up for discussion', chip: 'bg-sky-500/15 text-sky-300 ring-sky-500/30' },
-  adopted:  { label: 'Adopted',           chip: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
-  declined: { label: 'Not adopted',       chip: 'bg-slate-500/15 text-slate-400 ring-slate-500/30' },
-}
 
 // Next season by default — the whole point is changes for NEXT year, not a
 // mid-season rewrite of the rules everyone is already playing under.
@@ -54,7 +42,12 @@ export default function Proposals({ league, membership, members, toast, onDataCh
   const [form, setForm] = useState(EMPTY)
   const [submitting, setSubmitting] = useState(false)
 
-  const nameById = Object.fromEntries(members.map((m) => [m.profile_id, m.team_name]))
+  // Memoised: without this it is rebuilt on every keystroke in the modal, and
+  // `members` cannot change between fetches.
+  const nameById = useMemo(
+    () => Object.fromEntries(members.map((m) => [m.profile_id, m.team_name])),
+    [members]
+  )
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -74,15 +67,21 @@ export default function Proposals({ league, membership, members, toast, onDataCh
     if (!form.title.trim()) return toast.error('Give your idea a title.')
     setSubmitting(true)
     try {
-      const { error } = await supabase.from('rule_proposals').insert({
+      const { data, error } = await supabase.from('rule_proposals').insert({
         league_id: league.id,
         proposer_id: me,
         title: form.title.trim(),
         description: form.description.trim() || null,
         category: form.category,
         target_season: Number(form.target_season),
-      })
+      }).select('id').single()
       if (error) throw error
+      await logAudit({
+        leagueId: league.id, actorId: me, action: AUDIT_ACTIONS.PROPOSAL_ADDED,
+        entityType: 'proposal', entityId: data.id,
+        details: { title: form.title.trim(), category: form.category,
+                   target_season: Number(form.target_season) },
+      })
       toast.success('Put forward. The league can see it now.')
       setOpen(false)
       setForm(EMPTY)
@@ -104,6 +103,14 @@ export default function Proposals({ league, membership, members, toast, onDataCh
     try {
       const { error } = await supabase.rpc('adopt_proposal', { p_proposal: p.id })
       if (error) throw error
+      // The RPC logs rule.added for the new rule; this records the proposal
+      // side, so the trail shows the idea reaching the book rather than a rule
+      // appearing from nowhere.
+      await logAudit({
+        leagueId: league.id, actorId: me, action: AUDIT_ACTIONS.PROPOSAL_ADOPTED,
+        entityType: 'proposal', entityId: p.id,
+        details: { title: p.title, raised_by: nameById[p.proposer_id] ?? null },
+      })
       toast.success('Adopted and added to the rulebook.')
       await load()
       onDataChanged?.()
@@ -122,6 +129,11 @@ export default function Proposals({ league, membership, members, toast, onDataCh
         .update({ status: 'declined', resolved_by: me, resolved_at: new Date().toISOString() })
         .eq('id', p.id)
       if (error) throw error
+      await logAudit({
+        leagueId: league.id, actorId: me, action: AUDIT_ACTIONS.PROPOSAL_DECLINED,
+        entityType: 'proposal', entityId: p.id,
+        details: { title: p.title, raised_by: nameById[p.proposer_id] ?? null },
+      })
       toast.success('Marked as not adopted.')
       await load()
     } catch (err) {
@@ -138,9 +150,9 @@ export default function Proposals({ league, membership, members, toast, onDataCh
       const { error } = await supabase.from('rule_proposals').delete().eq('id', p.id)
       if (error) throw error
       await logAudit({
-        leagueId: league.id, actorId: me, action: AUDIT_ACTIONS.RULE_DELETED,
-        entityType: 'rule', entityId: p.id,
-        details: { title: p.title, proposal: true },
+        leagueId: league.id, actorId: me, action: AUDIT_ACTIONS.PROPOSAL_DELETED,
+        entityType: 'proposal', entityId: p.id,
+        details: { title: p.title },
       })
       toast.success('Deleted.')
       await load()
@@ -185,9 +197,16 @@ export default function Proposals({ league, membership, members, toast, onDataCh
         <Loading label="Loading proposals…" />
       ) : shown.length === 0 ? (
         <Card>
-          <EmptyState icon={Lightbulb} title="Nothing proposed yet">
-            Got a gripe about scoring, keepers or the punishment? Put it forward and
-            the league can chew on it before the draft.
+          {/* Distinguish "none exist" from "all of them are filtered out" —
+              otherwise this claims nothing was proposed while a "Show settled
+              (3)" button sits directly above it saying otherwise. */}
+          <EmptyState
+            icon={Lightbulb}
+            title={proposals.length === 0 ? 'Nothing proposed yet' : 'Nothing open right now'}
+          >
+            {proposals.length === 0
+              ? 'Got a gripe about scoring, keepers or the punishment? Put it forward and the league can chew on it before the draft.'
+              : `Every proposal has been settled. Show settled to see all ${resolved.length}.`}
           </EmptyState>
         </Card>
       ) : (

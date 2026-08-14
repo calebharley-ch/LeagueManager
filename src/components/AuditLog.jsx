@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeftRight, Check, X, Gavel, Ban, Trash2, ScrollText, ThumbsUp,
-  History, RefreshCw, ShieldAlert,
+  History, RefreshCw, ShieldAlert, Lightbulb,
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { AUDIT_ACTIONS, AUDIT_FROM_CLIENT } from '../lib/audit'
@@ -22,6 +22,10 @@ const ACTION_META = {
   [AUDIT_ACTIONS.RULE_ADDED]:      { icon: ScrollText,     tone: 'text-indigo-400',  verb: 'added a rule' },
   [AUDIT_ACTIONS.RULE_UPDATED]:    { icon: ScrollText,     tone: 'text-indigo-400',  verb: 'edited a rule' },
   [AUDIT_ACTIONS.RULE_DELETED]:    { icon: Trash2,         tone: 'text-rose-400',    verb: 'deleted a rule' },
+  [AUDIT_ACTIONS.PROPOSAL_ADDED]:    { icon: Lightbulb, tone: 'text-sky-400',     verb: 'proposed a change for next season' },
+  [AUDIT_ACTIONS.PROPOSAL_ADOPTED]:  { icon: Gavel,     tone: 'text-emerald-400', verb: 'adopted a proposal' },
+  [AUDIT_ACTIONS.PROPOSAL_DECLINED]: { icon: Ban,       tone: 'text-slate-400',   verb: 'declined a proposal' },
+  [AUDIT_ACTIONS.PROPOSAL_DELETED]:  { icon: Trash2,    tone: 'text-slate-400',   verb: 'withdrew a proposal' },
   [AUDIT_ACTIONS.RULE_PROPOSED]:   { icon: ScrollText,     tone: 'text-indigo-400',  verb: 'proposed a rule' },
   [AUDIT_ACTIONS.RULE_VOTED]:      { icon: ThumbsUp,       tone: 'text-slate-400',   verb: 'voted on a rule' },
   [AUDIT_ACTIONS.RULE_RATIFIED]:   { icon: Gavel,          tone: 'text-emerald-400', verb: 'ratified a rule' },
@@ -43,6 +47,10 @@ const COMMISH_ACTIONS = new Set([
   AUDIT_ACTIONS.RULE_DELETED,
   AUDIT_ACTIONS.RULE_RATIFIED,
   AUDIT_ACTIONS.RULE_REJECTED,
+  // Resolving a proposal is a commissioner act. Raising or withdrawing one is
+  // not — anybody can do those, and badging them "Commissioner" was the bug.
+  AUDIT_ACTIONS.PROPOSAL_ADOPTED,
+  AUDIT_ACTIONS.PROPOSAL_DECLINED,
 ])
 
 /** Turn the details jsonb into a short human clause. Unknown shapes fall back
@@ -60,6 +68,10 @@ function detailLine(entry) {
       return d.proposer && d.receiver ? `${d.proposer} ↔ ${d.receiver}` : null
     case AUDIT_ACTIONS.RULE_VOTED:
       return d.title ? `${d.vote === 'yes' ? '👍' : '👎'} ${d.title}` : null
+    case AUDIT_ACTIONS.PROPOSAL_ADDED:
+    case AUDIT_ACTIONS.PROPOSAL_ADOPTED:
+    case AUDIT_ACTIONS.PROPOSAL_DECLINED:
+    case AUDIT_ACTIONS.PROPOSAL_DELETED:
     case AUDIT_ACTIONS.RULE_ADDED:
     case AUDIT_ACTIONS.RULE_UPDATED:
     case AUDIT_ACTIONS.RULE_DELETED:

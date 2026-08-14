@@ -2,20 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, ScrollText, Trash2, Pencil, BookOpen, Check } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { logAudit, AUDIT_ACTIONS } from '../lib/audit'
-import { RULE_CATEGORIES, RULE_STATUS_STYLES, SEASONS, timeAgo } from '../lib/constants'
+import {
+  CATEGORY_CHIP, RULE_CATEGORIES, RULE_STATUS_STYLES, SEASONS, timeAgo,
+} from '../lib/constants'
 import Proposals from './Proposals'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
-  Select, Textarea, cx,
+  Segmented, Select, Textarea, cx,
 } from './ui'
-
-const CATEGORY_CHIP = {
-  Scoring:    'bg-indigo-500/15 text-indigo-300 ring-indigo-500/30',
-  Roster:     'bg-purple-500/15 text-purple-300 ring-purple-500/30',
-  Draft:      'bg-sky-500/15 text-sky-300 ring-sky-500/30',
-  Financial:  'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
-  Governance: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
-}
 
 // Order rules are shown in, regardless of when they were written. A rulebook
 // reads best grouped by subject.
@@ -86,6 +80,7 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
 
   const [view, setView] = useState('rules')
   const [rules, setRules] = useState([])
+  const [openProposals, setOpenProposals] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
   const [filterCat, setFilterCat] = useState('all')
@@ -101,13 +96,17 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
   )
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('league_rules')
-      .select('*')
-      .eq('league_id', league.id)
-      .order('created_at', { ascending: true })
-    if (error) toast.error(error.message)
-    else setRules(data ?? [])
+    // head+count: we need the number for the tab badge, not the rows.
+    const [rulesRes, propRes] = await Promise.all([
+      supabase.from('league_rules').select('*')
+        .eq('league_id', league.id).order('created_at', { ascending: true }),
+      supabase.from('rule_proposals').select('id', { count: 'exact', head: true })
+        .eq('league_id', league.id).eq('status', 'open'),
+    ])
+    if (rulesRes.error) toast.error(rulesRes.error.message)
+    else setRules(rulesRes.data ?? [])
+    // A missing table (migration not run) must not break the rulebook.
+    if (!propRes.error) setOpenProposals(propRes.count ?? 0)
     setLoading(false)
   }, [toast, league.id])
 
@@ -216,6 +215,10 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
     .filter(([, list]) => list.length > 0)
 
   const repealedCount = rules.filter((r) => r.status === 'rejected').length
+  // The header and the tab badge must count the same thing. They did not:
+  // one used every row, the other only adopted ones, and both were on screen
+  // together saying different numbers.
+  const adoptedCount = rules.filter((r) => r.status === 'passed').length
 
   return (
     <div className="space-y-4">
@@ -223,8 +226,8 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
         <div>
           <h2 className="text-lg font-black tracking-tight text-slate-100">Rulebook</h2>
           <p className="text-sm text-slate-500">
-            What the league has agreed, written down. {rules.length} rule
-            {rules.length === 1 ? '' : 's'} on the books.
+            What the league has agreed, written down. {adoptedCount} rule
+            {adoptedCount === 1 ? '' : 's'} on the books.
           </p>
         </div>
         {/* Commissioner only, matching the RLS. Showing this to a manager would
@@ -238,25 +241,17 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
 
       {/* ⚠️ TWO DISTINCT THINGS, DELIBERATELY NOT ONE LIST. Left is what the
           league has agreed; right is what someone wants to argue about. A
-          proposal sitting in the rulebook would read as law. */}
-      <div className="flex gap-1 rounded-lg bg-slate-900/60 p-1 ring-1 ring-slate-800">
-        {[
-          ['rules', 'The rulebook', rules.filter((r) => r.status === 'passed').length],
-          ['proposals', 'Ideas for next season', null],
-        ].map(([key, label, count]) => (
-          <button
-            key={key}
-            onClick={() => setView(key)}
-            className={cx(
-              'flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors',
-              view === key ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200'
-            )}
-          >
-            {label}
-            {count != null && <span className="ml-1 text-slate-500">({count})</span>}
-          </button>
-        ))}
-      </div>
+          proposal sitting in the rulebook would read as law.
+          The open count is here because otherwise a new idea is invisible
+          unless somebody clicks the tab on spec. */}
+      <Segmented
+        value={view}
+        onChange={setView}
+        options={[
+          { value: 'rules', label: 'The rulebook', count: adoptedCount },
+          { value: 'proposals', label: 'Ideas for next season', count: openProposals },
+        ]}
+      />
 
       {view === 'proposals' ? (
         <Proposals
