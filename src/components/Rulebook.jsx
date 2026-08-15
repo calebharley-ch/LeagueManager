@@ -6,9 +6,10 @@ import {
   CATEGORY_CHIP, RULE_CATEGORIES, RULE_STATUS_STYLES, SEASONS, timeAgo,
 } from '../lib/constants'
 import Proposals from './Proposals'
+import { appLink, SHARE_TEXT } from '../lib/share'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
-  Segmented, Select, Textarea, cx,
+  Segmented, Select, ShareButton, Textarea, cx,
 } from './ui'
 
 // Order rules are shown in, regardless of when they were written. A rulebook
@@ -25,10 +26,19 @@ const EMPTY_FORM = {
 }
 
 /* ── One written rule ─────────────────────────────────────────────────────── */
-function RuleCard({ rule, authorName, canManage, onEdit, onDelete, busy }) {
+function RuleCard({
+  rule, authorName, canManage, onEdit, onDelete, busy, leagueName, toast, focused,
+}) {
   const style = RULE_STATUS_STYLES[rule.status] ?? RULE_STATUS_STYLES.passed
   return (
-    <Card className={cx('px-4 py-3', rule.status === 'rejected' && 'opacity-60')}>
+    <Card
+      id={`rule-${rule.id}`}
+      className={cx(
+        'scroll-mt-32 px-4 py-3',
+        rule.status === 'rejected' && 'opacity-60',
+        focused && 'ring-2 ring-emerald-500/60'
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -54,16 +64,27 @@ function RuleCard({ rule, authorName, canManage, onEdit, onDelete, busy }) {
           </p>
         </div>
 
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-1">
-            <IconButton label="Edit rule" onClick={() => onEdit(rule)} disabled={busy}>
-              <Pencil className="h-4 w-4" />
-            </IconButton>
-            <IconButton label="Delete rule" onClick={() => onDelete(rule)} disabled={busy}>
-              <Trash2 className="h-4 w-4" />
-            </IconButton>
-          </div>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {/* Settling an argument in the chat. A link to the rule beats
+              retyping it, and cannot be misquoted on the way. */}
+          <ShareButton
+            compact
+            toast={toast}
+            label={`Share "${rule.title}"`}
+            url={appLink({ tab: 'rules', focus: rule.id })}
+            text={SHARE_TEXT.rule({ title: rule.title, league: leagueName })}
+          />
+          {canManage && (
+            <>
+              <IconButton label="Edit rule" onClick={() => onEdit(rule)} disabled={busy}>
+                <Pencil className="h-4 w-4" />
+              </IconButton>
+              <IconButton label="Delete rule" onClick={() => onDelete(rule)} disabled={busy}>
+                <Trash2 className="h-4 w-4" />
+              </IconButton>
+            </>
+          )}
+        </div>
       </div>
     </Card>
   )
@@ -74,7 +95,7 @@ function RuleCard({ rule, authorName, canManage, onEdit, onDelete, busy }) {
    already agreed — no voting, no ratification flow. Rules are written down,
    edited when they change, and struck through when repealed.
    ══════════════════════════════════════════════════════════════════════════ */
-export default function Rulebook({ league, membership, members, toast, onDataChanged }) {
+export default function Rulebook({ league, membership, members, toast, onDataChanged, focusId }) {
   const me = membership.profile_id
   const isCommish = membership.role === 'commissioner'
 
@@ -111,6 +132,26 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
   }, [toast, league.id])
 
   useEffect(() => { load() }, [load])
+
+  /* This tab holds two lists and a link only carries one id, so work out which
+     it is: a rule we have loaded, otherwise assume a proposal and let that
+     board deal with it. Wrong guesses cost a tab switch, not an error. */
+  const focusIsRule = !!focusId && rules.some((r) => r.id === focusId)
+  useEffect(() => {
+    if (!focusId || loading) return
+    setView(focusIsRule ? 'rules' : 'proposals')
+    if (!focusIsRule) return
+    // Repealed rules are hidden by default — reveal rather than land on a list
+    // that silently does not contain the thing that was linked.
+    const target = rules.find((r) => r.id === focusId)
+    if (target?.status === 'rejected') setShowRepealed(true)
+    if (target) setFilterCat('all')
+    const handle = requestAnimationFrame(() => {
+      document.getElementById(`rule-${focusId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    return () => cancelAnimationFrame(handle)
+  }, [focusId, focusIsRule, loading, rules])
 
   function openNew() {
     setForm(EMPTY_FORM)
@@ -259,6 +300,7 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
           membership={membership}
           members={members}
           toast={toast}
+          focusId={focusIsRule ? null : focusId}
           onDataChanged={async () => { await load(); onDataChanged?.() }}
         />
       ) : (
@@ -315,6 +357,9 @@ export default function Rulebook({ league, membership, members, toast, onDataCha
                   onEdit={openEdit}
                   onDelete={handleDelete}
                   busy={busyId === r.id}
+                  leagueName={league.name}
+                  toast={toast}
+                  focused={r.id === focusId}
                 />
               ))}
             </section>

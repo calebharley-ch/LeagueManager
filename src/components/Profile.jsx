@@ -5,7 +5,8 @@ import {
 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { timeAgo } from '../lib/constants'
-import { Badge, Button, Card, Field, IconButton, Input, Select } from './ui'
+import { inviteLink, SHARE_TEXT } from '../lib/share'
+import { Badge, Button, Card, Field, IconButton, Input, Select, ShareButton } from './ui'
 
 // Loose on purpose — the real check is the send failing. This only stops us
 // spending an API call on an obvious typo, and gates the Send button.
@@ -118,6 +119,41 @@ export default function Profile({
     } finally {
       setSendingId(null)
       setSendingAll(false)
+    }
+  }
+
+  /**
+   * Mint an invite row for a team with no email on file.
+   *
+   * The token and the code are the credential; the address was only ever how
+   * we delivered them. This is the path for somebody who is in the group chat
+   * but whose email nobody can remember.
+   *
+   * Deliberately does NOT then share — clipboard and the share sheet both need
+   * a live user gesture, and this insert has already spent it. The button
+   * becomes a Share button once the row exists, which is one extra tap and no
+   * mystery failures on iOS.
+   */
+  async function createLink(t) {
+    setSendingId(t.espn_team_id)
+    try {
+      const { error } = await supabase.from('league_invites').insert({
+        league_id: league.id,
+        espn_team_id: t.espn_team_id,
+        invited_by: membership.profile_id,
+      })
+      if (error) throw error
+      await loadInvites()
+      toast.success(`Invite link ready for ${t.team_name}.`)
+    } catch (err) {
+      // The likeliest failure by far is migration 017 not having been run.
+      toast.error(
+        /null value in column "email"/i.test(err.message)
+          ? 'Run migrations/RUN_ALL.sql — an invite link without an email needs migration 017.'
+          : err.message
+      )
+    } finally {
+      setSendingId(null)
     }
   }
 
@@ -409,21 +445,44 @@ export default function Profile({
                   </div>
                 </div>
 
-                {/* The code does the same job as the emailed link: joins the
-                    league AND binds this team. Here so it can be texted to
-                    someone who never opens their email. */}
-                {canInvite && inv?.code && (
-                  <button
-                    type="button"
-                    onClick={() => copyCode(inv.code, t.team_name)}
-                    className="mt-2 flex items-center gap-1.5 rounded-md bg-slate-950/60 px-2 py-1 font-mono text-xs tracking-widest text-slate-300 ring-1 ring-slate-800 transition-colors hover:text-emerald-300 hover:ring-slate-700"
-                    title={`Copy ${t.team_name}'s personal invite code`}
-                  >
-                    {inv.code}
-                    {copiedCode === inv.code
-                      ? <Check className="h-3 w-3 text-emerald-400" aria-hidden />
-                      : <Copy className="h-3 w-3 opacity-60" aria-hidden />}
-                  </button>
+                {/* Two ways to hand over the same thing, because the group
+                    chat is where these people actually are. The LINK signs
+                    them in and binds this team in one tap; the CODE is for
+                    reading down the phone. Neither needs an email address. */}
+                {canInvite && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {inv?.token ? (
+                      <ShareButton
+                        variant="neutral"
+                        label="Send invite link"
+                        toast={toast}
+                        url={inviteLink(inv.token)}
+                        text={SHARE_TEXT.invite({ team: t.team_name, league: league.name })}
+                      />
+                    ) : (
+                      <Button
+                        variant="neutral"
+                        className="text-xs"
+                        busy={sendingId === t.espn_team_id}
+                        onClick={() => createLink(t)}
+                      >
+                        <Link2 className="h-3.5 w-3.5" /> Create invite link
+                      </Button>
+                    )}
+                    {inv?.code && (
+                      <button
+                        type="button"
+                        onClick={() => copyCode(inv.code, t.team_name)}
+                        className="flex items-center gap-1.5 rounded-md bg-slate-950/60 px-2 py-1 font-mono text-xs tracking-widest text-slate-300 ring-1 ring-slate-800 transition-colors hover:text-emerald-300 hover:ring-slate-700"
+                        title={`Copy ${t.team_name}'s personal invite code`}
+                      >
+                        {inv.code}
+                        {copiedCode === inv.code
+                          ? <Check className="h-3 w-3 text-emerald-400" aria-hidden />
+                          : <Copy className="h-3 w-3 opacity-60" aria-hidden />}
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {canInvite && (
@@ -469,8 +528,9 @@ export default function Profile({
         {isCommish && teams.some((t) => !t.claimed) && (
           <div className="flex items-center gap-2 border-t border-slate-800 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-500">
             <Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            Share the invite code from League Settings. Unregistered teams still
-            appear everywhere and can be traded with in the meantime.
+            No email needed — send anyone their link straight to the group chat.
+            Unregistered teams still appear everywhere and can be traded with in
+            the meantime.
           </div>
         )}
       </Card>

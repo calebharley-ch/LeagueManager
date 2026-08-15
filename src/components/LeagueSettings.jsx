@@ -6,7 +6,8 @@ import {
 import { supabase } from '../supabaseClient'
 import { invalidatePlayers } from '../lib/usePlayers'
 import { timeAgo } from '../lib/constants'
-import { Badge, Button, Card, Field, Input, Modal, cx } from './ui'
+import { appLink, SHARE_TEXT } from '../lib/share'
+import { Badge, Button, Card, Field, Input, Modal, ShareButton, cx } from './ui'
 
 /**
  * Turn a functions.invoke() failure into something that names the actual cause.
@@ -189,7 +190,8 @@ export default function LeagueSettings({ league, membership, members, toast, onC
           <h3 className="text-sm font-bold text-slate-100">Invite managers</h3>
         </div>
         <p className="mb-3 text-sm text-slate-400">
-          Share this code. They register, pick “Join with a code”, and name their team.
+          The league-wide code. They register, pick “Join with a code”, and name their
+          own team — use it for anyone who is not already an ESPN team.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <code className="flex-1 rounded-lg bg-slate-950/70 px-4 py-2.5 text-center text-lg font-bold tracking-[0.3em] text-emerald-300 ring-1 ring-slate-800">
@@ -199,10 +201,24 @@ export default function LeagueSettings({ league, membership, members, toast, onC
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? 'Copied' : 'Copy'}
           </Button>
+          <ShareButton
+            variant="neutral"
+            label="Send link and code"
+            toast={toast}
+            url={appLink()}
+            text={SHARE_TEXT.joinCode({ league: league.name, code: league.invite_code })}
+          />
           <Button variant="ghost" busy={rotating} onClick={rotateCode}>
             <RotateCw className="h-4 w-4" /> New code
           </Button>
         </div>
+        {/* Points at the better door. This code makes them type a team name;
+            the per-team link does not, and cannot land them on the wrong one. */}
+        <p className="mt-3 text-xs text-slate-500">
+          For managers who already have an ESPN team, send their personal link from{' '}
+          <span className="text-slate-400">Profile &rarr; Managers</span> instead — it
+          binds them to the right team with nothing to type.
+        </p>
       </Card>
 
       {/* ── ESPN ───────────────────────────────────────────────────────────── */}

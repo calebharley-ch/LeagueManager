@@ -6,6 +6,7 @@ import {
 import { supabase } from './supabaseClient'
 import { buildTeams } from './lib/teams'
 import { captureInviteFromUrl, clearPendingInvite } from './lib/invite'
+import { captureDeepLink } from './lib/share'
 import Auth from './components/Auth'
 import SetPassword from './components/SetPassword'
 
@@ -122,11 +123,27 @@ export default function App() {
   })
   const [members, setMembers] = useState([])
   const [espnTeams, setEspnTeams] = useState([])
-  const [tab, setTab] = useState('trades')
   const [switcherOpen, setSwitcherOpen] = useState(false)
+
+  /* Deep links -------------------------------------------------------------
+     Read once, on mount, BEFORE the first render picks a tab — a link that
+     lands on Trades and then jumps is worse than one that never moved.
+     `focus` is the row to highlight; the tab it belongs to owns what that
+     means, and clears it as soon as the user navigates themselves. */
+  const [deepLink] = useState(captureDeepLink)
+  const [tab, setTab] = useState(deepLink.tab ?? 'trades')
+  const [focusId, setFocusId] = useState(deepLink.focus ?? null)
 
   const [refreshKey, setRefreshKey] = useState(0)
   const bumpRefresh = useCallback(() => setRefreshKey((n) => n + 1), [])
+
+  const goToTab = useCallback((key) => {
+    setTab(key)
+    // Their own navigation ends the link's claim on the screen — otherwise the
+    // highlighted card keeps glowing every time they come back to the tab.
+    setFocusId(null)
+    bumpRefresh()
+  }, [bumpRefresh])
 
   /* Invite links ------------------------------------------------------------
      Captured once on mount, before anything else can navigate. `invitePreview`
@@ -236,9 +253,15 @@ export default function App() {
     }
   }, [membershipsReady, memberships, leagueId])
 
+  // Consumed by the first league you open, so a shared link still lands on its
+  // tab when you had to choose a league on the way in. Switching leagues after
+  // that is a fresh start, and goes to Trades like always.
+  const unusedDeepLink = useRef(!!deepLink.tab)
+
   const pickLeague = useCallback((id) => {
     setLeagueId(id)
-    setTab('trades')
+    if (unusedDeepLink.current) unusedDeepLink.current = false
+    else { setTab('trades'); setFocusId(null) }
     setSwitcherOpen(false)
     try { localStorage.setItem(ACTIVE_LEAGUE_KEY, id) } catch { /* ignore */ }
   }, [])
@@ -459,7 +482,7 @@ export default function App() {
             {TABS.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
-                onClick={() => { setTab(key); bumpRefresh() }}
+                onClick={() => goToTab(key)}
                 aria-current={tab === key ? 'page' : undefined}
                 className={cx(
                   'flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors',
@@ -479,11 +502,12 @@ export default function App() {
       <main className="mx-auto max-w-5xl px-4 py-5">
         {tab === 'trades' && (
           <TradeTracker league={league} membership={membership} members={members}
-                        teams={teams} toast={toast} onDataChanged={bumpRefresh} />
+                        teams={teams} toast={toast} onDataChanged={bumpRefresh}
+                        focusId={focusId} />
         )}
         {tab === 'rules' && (
           <Rulebook league={league} membership={membership} members={members}
-                    toast={toast} onDataChanged={bumpRefresh} />
+                    toast={toast} onDataChanged={bumpRefresh} focusId={focusId} />
         )}
         {tab === 'rosters' && (
           <Rosters league={league} teams={teams} toast={toast} refreshKey={refreshKey} />

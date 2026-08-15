@@ -15,9 +15,10 @@ import {
   ASSET_STYLES, TRADE_STATUS_STYLES, POSITIONS, PICK_YEARS,
   MAX_OWN_PICKS_TRADED, describeAsset, timeAgo,
 } from '../lib/constants'
+import { appLink, SHARE_TEXT } from '../lib/share'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
-  Segmented, Select, Textarea, cx,
+  Segmented, Select, ShareButton, Textarea, cx,
 } from './ui'
 
 let assetKeySeq = 0
@@ -219,7 +220,7 @@ function VoteProgress({ approvals, vetoes, needApprove, needVeto }) {
 
 function TradeCard({
   trade, me, isCommish, teams, onAction, busyId, votes = [],
-  needApprove, needVeto, onVote, onSettle,
+  needApprove, needVeto, onVote, onSettle, toast, focused = false,
 }) {
   const status = TRADE_STATUS_STYLES[trade.status] ?? TRADE_STATUS_STYLES.pending
   const isReceiver = trade.receiver_id === me
@@ -263,8 +264,18 @@ function TradeCard({
     </div>
   )
 
+  const tradeUrl = appLink({ tab: 'trades', focus: trade.id })
+
   return (
-    <Card className="overflow-hidden">
+    <Card
+      id={`trade-${trade.id}`}
+      className={cx(
+        'overflow-hidden scroll-mt-32 transition-shadow',
+        // Arrived here from a shared link. Says "this one" without moving
+        // anything, which a jump-and-expand would.
+        focused && 'ring-2 ring-emerald-500/60'
+      )}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm">
           <span className="font-bold text-slate-100">{proposerName}</span>
@@ -327,6 +338,18 @@ function TradeCard({
             >
               <ThumbsDown className="h-3.5 w-3.5" /> Veto
             </Button>
+            {/* The one moment that needs the group chat: five of twelve people
+                have to act, and nothing else in this app can reach them. */}
+            <ShareButton
+              variant="neutral"
+              label="Ask the league"
+              toast={toast}
+              url={tradeUrl}
+              text={SHARE_TEXT.tradeVote({
+                proposer: proposerName, receiver: receiverName,
+                approvals, needApprove,
+              })}
+            />
             <span className="text-xs text-slate-500">
               {myVote
                 ? (isProposer || isReceiver) && myVote.approve
@@ -356,16 +379,31 @@ function TradeCard({
               Not applied in ESPN yet — move the {describeEspnWork(trade)} there.
             </span>
           )}
-          {isCommish && (
-            <Button
-              variant={trade.espn_settled_at ? 'ghost' : 'neutral'}
-              busy={busy}
-              className="text-xs"
-              onClick={() => onSettle(trade, !trade.espn_settled_at)}
-            >
-              {trade.espn_settled_at ? 'Mark not applied' : 'Mark applied in ESPN'}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Chasing the two managers to actually do it in ESPN. */}
+            {!trade.espn_settled_at && (
+              <ShareButton
+                label="Remind them"
+                toast={toast}
+                url={tradeUrl}
+                text={SHARE_TEXT.tradeEspn({
+                  proposer: proposerName,
+                  receiver: receiverName,
+                  work: describeEspnWork(trade),
+                })}
+              />
+            )}
+            {isCommish && (
+              <Button
+                variant={trade.espn_settled_at ? 'ghost' : 'neutral'}
+                busy={busy}
+                className="text-xs"
+                onClick={() => onSettle(trade, !trade.espn_settled_at)}
+              >
+                {trade.espn_settled_at ? 'Mark not applied' : 'Mark applied in ESPN'}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -382,11 +420,25 @@ function TradeCard({
             </>
           )}
           {pending && isProposer && (
-            <span className="text-xs text-slate-500">
-              {unclaimedReceiver
-                ? `${receiverName} has no account yet — settle this yourself or as commissioner.`
-                : `Waiting on ${receiverName}…`}
-            </span>
+            <>
+              <span className="text-xs text-slate-500">
+                {unclaimedReceiver
+                  ? `${receiverName} has no account yet — settle this yourself or as commissioner.`
+                  : `Waiting on ${receiverName}…`}
+              </span>
+              {/* An email went out when this was proposed. This is for when it
+                  did not get read, which is most of the time. */}
+              {!unclaimedReceiver && (
+                <ShareButton
+                  label={`Nudge ${receiverName}`}
+                  toast={toast}
+                  url={tradeUrl}
+                  text={SHARE_TEXT.tradePending({
+                    proposer: proposerName, receiver: receiverName,
+                  })}
+                />
+              )}
+            </>
           )}
           {pending && !isReceiver && !isProposer && !isCommish && (
             <span className="text-xs text-slate-500">Awaiting the receiving manager.</span>
@@ -421,7 +473,9 @@ function TradeCard({
 /* ══════════════════════════════════════════════════════════════════════════
    Main
    ══════════════════════════════════════════════════════════════════════════ */
-export default function TradeTracker({ league, membership, members, teams, toast, onDataChanged }) {
+export default function TradeTracker({
+  league, membership, members, teams, toast, onDataChanged, focusId,
+}) {
   const players = usePlayers(league.id)
   const me = membership.profile_id
   // Defined once here rather than inline at the call site — the ESPN worklist
@@ -826,6 +880,26 @@ export default function TradeTracker({ league, membership, members, teams, toast
   const shown = tab === 'pending' ? openTrades : settledTrades
   const awaitingEspn = useMemo(() => tradesAwaitingEspn(trades), [trades])
 
+  /* Arrived from a shared link.
+   *
+   * Has to wait for `trades` to load — the card does not exist to scroll to
+   * until then. Switching the sub-tab first matters more than the scroll: a
+   * link to a settled trade otherwise lands on Open and shows nothing, which
+   * reads as a broken link rather than a filtered one. */
+  useEffect(() => {
+    if (!focusId || !trades.length) return
+    const target = trades.find((t) => t.id === focusId)
+    if (!target) return
+    const open = target.status === 'pending' || target.status === 'accepted'
+    setTab(open ? 'pending' : 'settled')
+    // After paint, once the tab switch has rendered the card.
+    const handle = requestAnimationFrame(() => {
+      document.getElementById(`trade-${focusId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    return () => cancelAnimationFrame(handle)
+  }, [focusId, trades])
+
   // Waiting on YOU: a trade you must answer, or a vote you have not cast.
   const myPendingCount = trades.filter((t) => {
     if (t.status === 'pending') return t.receiver_id === me
@@ -906,6 +980,8 @@ export default function TradeTracker({ league, membership, members, teams, toast
               needVeto={league.trade_votes_to_veto ?? 9}
               onVote={handleVote}
               onSettle={handleSettle}
+              toast={toast}
+              focused={t.id === focusId}
             />
           ))}
         </div>

@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
-import { X, Loader2, Inbox } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { X, Loader2, Inbox, Share2, Link2, Check } from 'lucide-react'
+import { canNativeShare, shareLink } from '../lib/share'
 
 export function cx(...parts) {
   return parts.filter(Boolean).join(' ')
@@ -31,6 +32,47 @@ export function Button({ variant = 'neutral', busy = false, className, children,
       {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
       {children}
     </button>
+  )
+}
+
+/**
+ * "Send this to the group chat."
+ *
+ * One button, two behaviours by device: the OS share sheet on a phone (which
+ * is how it reaches WhatsApp in one tap) and the clipboard everywhere else.
+ * The label follows, because "Share" on a desktop that silently copied is a
+ * button you press twice.
+ */
+export function ShareButton({
+  text, url, toast, label, title, variant = 'ghost', className, compact = false,
+}) {
+  const [done, setDone] = useState(null)
+
+  async function go() {
+    const result = await shareLink({ text, url, toast })
+    if (result === 'shared' || result === 'copied') {
+      setDone(result)
+      setTimeout(() => setDone(null), 1800)
+    }
+  }
+
+  const Icon = done ? Check : canNativeShare ? Share2 : Link2
+  const words = label ?? (canNativeShare ? 'Share' : 'Copy link')
+  const doneWords = done === 'shared' ? 'Sent' : 'Copied'
+
+  return (
+    <Button
+      type="button"
+      variant={variant}
+      onClick={go}
+      // Compact hides its label, so the tooltip has to carry it — otherwise
+      // three icon-only buttons on a card all describe themselves identically.
+      title={title ?? (compact ? words : canNativeShare ? 'Share this link' : 'Copy this link to the clipboard')}
+      className={cx('text-xs', className)}
+    >
+      <Icon className={cx('h-3.5 w-3.5', done && 'text-emerald-400')} aria-hidden />
+      <span className={cx(compact && 'sr-only')}>{done ? doneWords : words}</span>
+    </Button>
   )
 }
 

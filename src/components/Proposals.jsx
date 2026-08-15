@@ -5,9 +5,10 @@ import { logAudit, AUDIT_ACTIONS } from '../lib/audit'
 import {
   CATEGORY_CHIP, PROPOSAL_STATUS_STYLES as STATUS, RULE_CATEGORIES, SEASONS, timeAgo,
 } from '../lib/constants'
+import { appLink, SHARE_TEXT } from '../lib/share'
 import {
   Badge, Button, Card, EmptyState, Field, IconButton, Input, Loading, Modal,
-  Select, Textarea, cx,
+  Select, ShareButton, Textarea, cx,
 } from './ui'
 
 // Next season by default — the whole point is changes for NEXT year, not a
@@ -29,7 +30,7 @@ const EMPTY = {
  * commissioner records the outcome here afterwards, and adopting a proposal
  * writes it into the rulebook properly.
  */
-export default function Proposals({ league, membership, members, toast, onDataChanged }) {
+export default function Proposals({ league, membership, members, toast, onDataChanged, focusId }) {
   const me = membership.profile_id
   const isCommish = membership.role === 'commissioner'
 
@@ -167,6 +168,20 @@ export default function Proposals({ league, membership, members, toast, onDataCh
   const resolved = proposals.filter((p) => p.status !== 'open')
   const shown = showResolved ? proposals : openOnes
 
+  /* A shared link to a settled proposal would otherwise land on a list that
+     filters it out — reveal it rather than showing an empty board. */
+  useEffect(() => {
+    if (!focusId || !proposals.length) return
+    const target = proposals.find((p) => p.id === focusId)
+    if (!target) return
+    if (target.status !== 'open') setShowResolved(true)
+    const handle = requestAnimationFrame(() => {
+      document.getElementById(`proposal-${focusId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    return () => cancelAnimationFrame(handle)
+  }, [focusId, proposals])
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -216,7 +231,15 @@ export default function Proposals({ league, membership, members, toast, onDataCh
             const mine = p.proposer_id === me
             const busy = busyId === p.id
             return (
-              <Card key={p.id} className={cx('px-4 py-3', p.status === 'declined' && 'opacity-60')}>
+              <Card
+                key={p.id}
+                id={`proposal-${p.id}`}
+                className={cx(
+                  'scroll-mt-32 px-4 py-3',
+                  p.status === 'declined' && 'opacity-60',
+                  p.id === focusId && 'ring-2 ring-emerald-500/60'
+                )}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -238,11 +261,27 @@ export default function Proposals({ league, membership, members, toast, onDataCh
                     </p>
                   </div>
 
-                  {(mine || isCommish) && p.status === 'open' && (
-                    <IconButton label={`Delete ${p.title}`} disabled={busy} onClick={() => remove(p)}>
-                      <Trash2 className="h-4 w-4" />
-                    </IconButton>
-                  )}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {/* An idea nobody reads is not a proposal, it is a diary
+                        entry. Open ones only — a settled one is a record. */}
+                    {p.status === 'open' && (
+                      <ShareButton
+                        compact
+                        toast={toast}
+                        label="Share this proposal"
+                        url={appLink({ tab: 'rules', focus: p.id })}
+                        text={SHARE_TEXT.proposal({
+                          title: p.title,
+                          author: nameById[p.proposer_id] ?? 'Someone',
+                        })}
+                      />
+                    )}
+                    {(mine || isCommish) && p.status === 'open' && (
+                      <IconButton label={`Delete ${p.title}`} disabled={busy} onClick={() => remove(p)}>
+                        <Trash2 className="h-4 w-4" />
+                      </IconButton>
+                    )}
+                  </div>
                 </div>
 
                 {isCommish && p.status === 'open' && (
